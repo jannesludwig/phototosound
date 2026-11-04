@@ -45,6 +45,8 @@ void main() {
   float on = step(0.8, hash11(band * 1.37 + floor(uTime * 13.0)));
   q.x += (hash11(band + floor(uTime * 29.0)) - 0.5) * 0.14 * uNoise * on * (0.25 + d);
 
+  q += fieldAt(q) * 1.4;                                    // pushed by the hand, springs back
+  q.y -= uFall * uFall * d * (0.2 + seed * 0.6);
   float flash = sparks(home, 34.0, 0.45);
   float z = (seed2 - 0.5) * 0.5 * d;
   vec4 mv = modelViewMatrix * vec4(q, z, 1.0);
@@ -79,7 +81,7 @@ void main() {
   gl_FragColor = vec4(vColor.rgb * a, 1.0);
 }`;
 
-export class Dissolution extends World {
+export class Particles extends World {
   constructor(ctx) {
     super(ctx);
     const { analysis, quality, params } = ctx;
@@ -139,7 +141,9 @@ export class Dissolution extends World {
 
   update(s) {
     // how far the image has come apart follows the form of the piece
-    const target = s.form * (0.22 + 0.58 * s.energy) + s.brk * 0.25;
+    // dissolves with the tension; RECONSTRUCT brings every particle home
+    const rec = s.sigName === 'RECONSTRUCT' ? s.signature : 0;
+    const target = (0.18 + 0.62 * s.tension) * (1 - rec);
     this.dis += (target - this.dis) * Math.min(1, s.dt * 0.6);
     this.mat.uniforms.uDis.value = this.dis + s.kick * 0.02;
   }

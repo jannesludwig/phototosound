@@ -30,7 +30,8 @@ float glyph(float g, vec2 f) {
 }
 
 void main() {
-  vec2 pImg = vW / uHalf;
+  vec2 fd = fieldAt(vW);
+  vec2 pImg = (vW - fd * 1.5) / uHalf;    // cells are displaced by the hand…
   float rows = floor(uCols * uHalf.y / uHalf.x + 0.5);
   vec2 grid = vec2(uCols, rows);
   vec2 g = (pImg * 0.5 + 0.5) * grid;
@@ -57,6 +58,7 @@ void main() {
   // ── cell state flips on steps; each cell has its own period (1..4 steps)
   float period = 1.0 + floor(hash21(cell + 0.5) * 4.0);
   float h = hash21(cell + floor(st / period) * 0.1373);
+  h = mix(h, fract(h + 0.37), step(0.012, length(fd)));   // …and flipped where it passes
   float e = 0.45 + 0.55 * uEnergy;
   // cells that differ from the image's average carry the data; the background recedes
   float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));

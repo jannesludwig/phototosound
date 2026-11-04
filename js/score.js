@@ -113,8 +113,17 @@ export function planPiece(an, st, mood, content) {
   for (const k in sw) sw[k] += rng() * 0.1;
   const sigRank = SIGNATURES.slice().sort((a, b) => sw[b] - sw[a]);
 
+  // seeded visual parameters (so two photos in the same vocabulary still differ)
+  const vr = makeRng(seed ^ 0xa11ce);
+  const ACCENTS = [[0.45, 0.95, 1.0], [0.55, 0.78, 1.0], [0.5, 1.0, 0.86], [0.72, 0.86, 1.0], [0.35, 0.85, 0.95]];
+  const params = {
+    accent: vr.pick(ACCENTS), density: vr.range(0.8, 1.2), speed: vr.range(0.75, 1.3), thickness: vr.range(0.7, 1.4),
+    matrixCols: vr.int(36, 72), contourLevels: vr.int(14, 34), orbitRings: vr.range(0.035, 0.08),
+  };
+
   const stepDur = 60 / bpm / 4;
   const piece = {
+    params,
     seed, bpm, stepDur, barDur: stepDur * STEPS, root, scale, mode: M.name, chords, mood, content: c,
     amt, has, kickStyle, kickChar, swing, hatW, clickCycle,
     vocabWeights: vw, vocabRank, sigWeights: sw, sigRank,
