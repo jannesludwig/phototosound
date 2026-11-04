@@ -11,7 +11,8 @@ export const MOODS = {
   'cold / clinical': { warmth: 0.25, energy: 0.5, darkness: 0.3, openness: 0.3, intimacy: 0.1 },
   'dark / mysterious': { warmth: 0.45, energy: 0.35, darkness: 0.85, openness: 0.45, intimacy: 0.25 },
   'vast / calm': { warmth: 0.5, energy: 0.15, darkness: 0.35, openness: 0.85, intimacy: 0.15 },
-  'tense / dense': { warmth: 0.5, energy: 0.8, darkness: 0.45, openness: 0.1, intimacy: 0.15 },
+  'tense / dense': { warmth: 0.4, energy: 0.85, darkness: 0.45, openness: 0.1, intimacy: 0.15 },
+  'vivid / restless': { warmth: 0.85, energy: 0.6, darkness: 0.3, openness: 0.15, intimacy: 0.2 },
 };
 
 export function deriveMood(f, st, content) {
