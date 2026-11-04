@@ -1,20 +1,18 @@
 // ─────────────────────────────────────────────────────────────
-//  main.js — the performance: landing → reading → playing.
-//  analysis + structures + face + content + mood → score → both
-//  engines on one audio clock. Also: the thin 2D overlay, the UI,
-//  and the hand (force field, cursor sound, hold-to-observe).
+//  main.js — the experience: landing → reading → playing.
+//  Wires analysis, the composer, the audio engine and the visuals,
+//  and draws the thin 2D overlay (scan line, read-head, observer).
 // ─────────────────────────────────────────────────────────────
 import { analyzeImage, rasterize } from './analysis.js';
 import { extractStructures } from './structures.js';
-import { preloadFaceDetector, detectFace, faceLandmarks } from './face.js';
-import { preloadClassifier, classifyContent } from './classify.js';
-import { deriveMood } from './mood.js';
-import { planPiece, LAYERS, STEPS } from './score.js';
+import { preloadFaceDetector, detectFace } from './face.js';
+import { chooseWorlds, pieceParams, WORLDS } from './worlds.js';
+import { Composer, readWindow, STEPS, LAYERS } from './audio/composer.js';
 import { AudioEngine } from './audio/engine.js';
 import { Visuals } from './visuals/engine.js';
 import { Recorder } from './recorder.js';
 import { DEMOS } from './demo.js';
-import { clamp } from './rng.js';
+import { smoothstep, clamp } from './rng.js';
 
 const $ = (id) => document.getElementById(id);
 const body = document.body;
@@ -26,18 +24,25 @@ const visuals = new Visuals($('gl'), quality);
 const recorder = new Recorder();
 const overlay = $('overlay'), octx = overlay.getContext('2d');
 
+// app state
 const app = {
-  state: 'landing', analysis: null, st: null, piece: null, mood: null,
-  intro: 0, readT: 0, readDur: 4.2, paused: false, ticks: [], generation: 0,
-  pointer: { x: 0, y: 0, lx: 0, ly: 0, lt: 0, down: false, moved: 0 },
+  state: 'landing',
+  analysis: null, choice: null, params: null, composer: null,
+  intro: 0, readT: 0, readDur: 3.6, form: 0, energy: 0,
+  manualWorld: null, paused: false, ticks: [],
+  lastMove: 0, pointer: { x: 0, y: 0, active: false, touch: false },
+  generation: 0,
 };
+
 const hashParams = new URLSearchParams(location.hash.slice(1));
 
+// ── setup ──────────────────────────────────────────────────
 function setState(s) {
   app.state = s;
   body.classList.remove('state-landing', 'state-reading', 'state-playing');
   body.classList.add('state-' + s);
 }
+
 function resize() {
   const dpr = Math.min(devicePixelRatio || 1, 2);
   overlay.width = innerWidth * dpr; overlay.height = innerHeight * dpr;
@@ -49,20 +54,14 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
-// models load while the visitor looks at the empty screen
-setTimeout(() => { preloadFaceDetector(); setTimeout(preloadClassifier, 1500); }, 600);
+// preload the face detector while the visitor looks at the empty screen
+setTimeout(() => preloadFaceDetector(), 600);
 
 // ── input: file / drop / demo ──────────────────────────────
-$('file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); e.target.value = ''; });
-$('drop').addEventListener('click', () => audio.unlock());
+// Picking and dropping are caught by the classic script in index.html (it always runs, also
+// when this module is late); it hands files to __p2sLoad and queues them until we are ready.
+$('drop').addEventListener('click', () => audio.unlock());      // gesture → unlock audio early (iOS)
 $('drop').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
-addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('dragging'); });
-addEventListener('dragleave', (e) => { if (!e.relatedTarget) body.classList.remove('dragging'); });
-addEventListener('drop', (e) => {
-  e.preventDefault(); body.classList.remove('dragging');
-  const f = [...(e.dataTransfer?.files || [])].find((x) => /image\/(jpeg|png)/.test(x.type));
-  if (f) loadFile(f);
-});
 const demoBytes = (d) => new TextEncoder().encode('photo-to-sound/demo/' + d.name);
 document.querySelectorAll('#demo button').forEach((b) => b.addEventListener('click', () => {
   audio.unlock();
@@ -70,134 +69,170 @@ document.querySelectorAll('#demo button').forEach((b) => b.addEventListener('cli
   begin(d.make(), d.name, demoBytes(d));
 }));
 
-async function loadFile(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image(); img.decoding = 'async'; img.src = url; await img.decode();
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    begin(img, file.name.replace(/\.[^.]+$/, ''), bytes);
-  } catch (e) { console.warn('could not read image', e); }
-  finally { setTimeout(() => URL.revokeObjectURL(url), 5000); }
-}
+function message(text) { const m = $('msg'); m.textContent = text || ''; m.hidden = !text; }
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+/** Decode an image file robustly (Safari/WebKit: decode() can reject for large photos). */
+async function decodeFile(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* try the next way */ }
+    try { return await createImageBitmap(file); } catch (e) { /* try the next way */ }
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.src = url;
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  if (img.decode) { try { await img.decode(); return img; } catch (e) { /* fall back to onload */ } }
+  await new Promise((res, rej) => {
+    if (img.complete && img.naturalWidth) return res();
+    img.onload = res; img.onerror = () => rej(new Error('decode failed'));
+  });
+  return img;
+}
+async function fileBytes(file) {
+  if (file.arrayBuffer) return new Uint8Array(await file.arrayBuffer());
+  return new Promise((res) => { const r = new FileReader(); r.onload = () => res(new Uint8Array(r.result)); r.onerror = () => res(null); r.readAsArrayBuffer(file); });
+}
+async function loadFile(file) {
+  message('');
+  try {
+    const [src, bytes] = await Promise.all([decodeFile(file), fileBytes(file).catch(() => null)]);
+    if (!(src.naturalWidth || src.width)) throw new Error('empty image');
+    begin(src, (file.name || 'photo').replace(/\.[^.]+$/, ''), bytes);
+  } catch (e) {
+    console.warn('could not read image', e);
+    setState('landing');
+    message('could not read this image — try a JPG or PNG');
+  }
+}
+// ready: take files from the classic script (and any that arrived before this module ran)
+window.__p2sLoad = (f) => loadFile(f);
+for (const f of (window.__p2sQueue || []).splice(0)) loadFile(f);
 
 // ── reading ────────────────────────────────────────────────
 async function begin(src, name, signatureBytes = null) {
   const gen = ++app.generation;
   audio.stopPiece();
   if (recorder.active) await stopRecording();
+  app.name = name;
+  // the texture (sharp) and the analysis copy (small)
   const texCanvas = rasterize(src, mobile ? 1536 : 2048);
   const analysis = analyzeImage(texCanvas, signatureBytes);
-  Object.assign(app, { analysis, st: null, piece: null, mood: null, intro: 0, readT: 0, paused: false, ticks: [] });
+  app.analysis = analysis; app.choice = null; app.composer = null;
+  app.intro = 0; app.form = 0; app.readT = 0; app.paused = false; app.manualWorld = hashParams.get('world');
   visuals.setPhoto(analysis, texCanvas);
   $('b-play').textContent = 'pause';
   $('r-sig').textContent = 'sig ' + analysis.signature;
   setState('reading');
-  readoutLines = []; renderReadout(); placeReadout();
+  placeReadout();
+  readoutLines = []; renderReadout();
 
-  await nextFrame();                                         // let the photo appear first
-  const st = app.st = extractStructures(texCanvas, analysis.seed);
+  // the photo's own contours (for the quanta + edge clicks) and face detection, while the scan line passes
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  app.st = extractStructures(texCanvas, analysis.seed);
   const faceCanvas = rasterize(src, 640);
-  const facePromise = detectFace(faceCanvas).then(async (face) => ({ face, lm: face.face ? await faceLandmarks(faceCanvas) : null }));
-  const contentPromise = classifyContent(rasterize(src, 320));
-  const [{ face, lm }, cls] = await Promise.all([facePromise, contentPromise, wait(app.readDur * 1000)]);
+  const [face] = await Promise.all([detectFace(faceCanvas), wait(app.readDur * 1000)]);
   if (gen !== app.generation) return;
   Object.assign(analysis.features, face);
-  pushReadout(face.face > 0 ? `subject: <span class="hot">face ${fmt(face.face)}</span>${lm ? ` · ${lm.strokes.length} contours` : ''}` : `subject: ${analysis.features.organic > 0.35 ? 'organic ' + fmt(analysis.features.organic) : 'none'}`);
-  if (cls.labels.length) pushReadout(`content: ${cls.labels[0].name} ${fmt(cls.labels[0].score)}${cls.top ? ' → ' + cls.top : ''}`);
-  const mood = app.mood = deriveMood(analysis.features, st, cls.content);
-  pushReadout(`mood: <span class="hot">${mood.name}</span>`);
-  await wait(450);
+  pushReadout(subjectLine(analysis.features));
+
+  // the world this photograph chooses
+  const choice = chooseWorlds(analysis.features, analysis.seed);
+  if (app.manualWorld && WORLDS.includes(app.manualWorld)) overrideChoice(choice, app.manualWorld);
+  const params = pieceParams(analysis, choice);
+  app.choice = choice; app.params = params;
+  await wait(500);
   if (gen !== app.generation) return;
-  const piece = app.piece = planPiece(analysis, st, mood, cls.content);
-  const pl = piece.pass(0);
-  pushReadout(`score: ${piece.bpm.toFixed(1)} bpm · ${piece.mode} · ${pl.sections.map((s) => s.bars).join('/')}`);
-  pushReadout(`vocabulary: <span class="hot">${pl.vocab.join(' · ')}</span> → ${pl.signature.toLowerCase()}`);
-  $('r-bpm').textContent = piece.bpm.toFixed(1) + ' BPM';
-  $('r-hz').textContent = piece.root.toFixed(2) + ' Hz · ' + piece.mode;
-  await wait(1300);
+  pushReadout(`world: <span class="hot">${choice.primary} × ${choice.secondary}</span>`);
+  $('r-bpm').textContent = params.bpm.toFixed(1) + ' BPM';
+  $('r-hz').textContent = params.root.toFixed(2) + ' Hz';
+  updateWorldLabel();
+  await wait(1100);
   if (gen !== app.generation) return;
 
-  visuals.setPiece(piece, { st, face: lm });
-  const forced = hashParams.get('layer'); if (forced && LAYERS.includes(forced)) visuals.forceLead(forced);
-  audio.loadPiece(piece, analysis);
-  if (!audio.running) {
+  app.composer = new Composer(analysis, params, choice.primary, choice.secondary, choice.accent);
+  audio.loadPiece(app.composer, analysis, params);
+  visuals.beginWorlds(params, choice, app.st);
+
+  if (!audio.running) {           // dropped without a gesture (or iOS) → ask for one tap
     const ok = await audio.unlock();
     if (!ok) { $('prompt').hidden = false; await new Promise((res) => { app.awaitTap = res; }); $('prompt').hidden = true; }
   }
   if (gen !== app.generation) return;
-  // deep link: #bar=40 or #section=PEAK (+ #at=bars into it)
-  const sec = pl.sections.find((x) => x.name === (hashParams.get('section') || '').toUpperCase());
-  audio.start(sec ? sec.start + +(hashParams.get('at') || 0) : +(hashParams.get('bar') || 0));
+  // deep links: #bar=40  or  #section=PEAK&at=4
+  const secLink = app.composer.sections.find((x) => x.name === (hashParams.get('section') || '').toUpperCase());
+  const startBar = secLink ? secLink.start + +(hashParams.get('at') || 0) : +(hashParams.get('bar') || 0);
+  if (startBar) app.form = 1;
+  audio.start(startBar);
   setState('playing');
-  updateWorldLabel();
   showUI();
 }
 
+function overrideChoice(choice, world) {
+  if (choice.primary === world) return;
+  const second = choice.primary;
+  choice.secondary = second; choice.primary = world;
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// readout lines appear while the scan line passes
 let readoutLines = [];
 function pushReadout(html) { readoutLines.push(html); renderReadout(); }
-let readoutMax = 99;
-function renderReadout() { $('readout').innerHTML = readoutLines.slice(-readoutMax).join('\n'); }   // newest lines that fit
+function renderReadout() { $('readout').innerHTML = readoutLines.join('\n'); }
 function placeReadout() {
   const el = $('readout');
   if (!visuals.photo) return;
   const r = visuals.imageRect();
   const right = innerWidth - (r.x + r.w), below = innerHeight - (r.y + r.h);
-  const LH = 16.5;                                           // readout line height (px)
   el.classList.remove('inset');
-  if (right >= 220) { el.style.left = (r.x + r.w + 18) + 'px'; el.style.top = r.y + 'px'; readoutMax = Math.max(4, (innerHeight - r.y - 40) / LH | 0); }
-  else if (below >= 110) { el.style.left = r.x + 'px'; el.style.top = (r.y + r.h + 22) + 'px'; readoutMax = Math.max(3, (below - 60) / LH | 0); }
-  else { el.classList.add('inset'); el.style.left = (r.x + 10) + 'px'; el.style.top = (r.y + 10) + 'px'; readoutMax = Math.max(3, (r.h - 30) / LH | 0); } // over the photo
-  renderReadout();
+  if (right >= 200) { el.style.left = (r.x + r.w + 18) + 'px'; el.style.top = r.y + 'px'; }
+  else if (below >= 175) { el.style.left = r.x + 'px'; el.style.top = (r.y + r.h + 22) + 'px'; }
+  else { el.classList.add('inset'); el.style.left = (r.x + 10) + 'px'; el.style.top = (r.y + 10) + 'px'; } // over the photo
 }
 const fmt = (x) => x.toFixed(2);
-function readingLines(a, st) {
+function subjectLine(f) {
+  return f.face > 0 ? `subject: <span class="hot">face ${fmt(f.face)}</span>` : `subject: ${f.organic > 0.35 ? 'organic ' + fmt(f.organic) : 'none'}`;
+}
+// short lines revealed at scan progress p
+function readingLines(a) {
   const f = a.features;
-  const lines = [[0.02, `signature: <span class="hot">${a.signature}</span>`],
-    [0.1, `luminance: ${fmt(f.brightness)} · contrast ${fmt(f.contrast)}`]];
-  if (!st) return lines;
   const pal = a.palette.map((c) => `<i class="sw" style="background:rgb(${c.r * 255 | 0},${c.g * 255 | 0},${c.b * 255 | 0})"></i>`).join('');
-  return lines.concat([
-    [0.2, `strokes: ${st.strokes.length} · contours ${st.contours.lines.length}`],
-    [0.3, `lines: ${st.segments.length} · corners ${st.corners.length}`],
-    [0.4, `luminance points: ${a.points.length}`],
-    [0.5, `regions: ${st.regions.distinct} · fragments ${st.fragments.length}`],
-    [0.6, `salient: ${st.salient.peaks.length} · void ${(st.voids.fraction * 100).toFixed(0)}%`],
-    [0.7, `flow: ${fmt(f.flow)} · smooth ${fmt(f.smoothness)}`],
-    [0.8, `colour: ${st.colour.temperature >= 0 ? 'warm' : 'cold'} ${fmt(Math.abs(st.colour.temperature))} · vivid ${fmt(st.colour.colourfulness)}`],
-    [0.9, `palette: ${pal}`],
-  ]);
+  return [
+    [0.02, `signature: <span class="hot">${a.signature}</span>`],
+    [0.13, `luminance: ${fmt(f.brightness)} · contrast ${fmt(f.contrast)}`],
+    [0.25, `structure: ${f.lineStrength > 0.4 ? 'linear' : 'diffuse'} ${fmt(f.lineStrength)} ${f.lineOrientation === 'h' ? '—' : '|'}`],
+    [0.37, `luminance points: ${f.pointCount}`],
+    [0.49, `radial: ${fmt(f.circularity)} · flow ${fmt(f.flow)}`],
+    [0.61, `gradient: ${f.smoothness > 0.5 ? 'smooth' : 'textured'} ${fmt(f.smoothness)}`],
+    [0.73, `flatness: ${fmt(f.flatness)} · colours ${f.colorCount}`],
+    [0.85, `palette: ${pal}`],
+  ];
 }
 
-// ── the hand: force field, cursor sound, hold-to-observe ───
-let uiTimer = 0, holdTimer = 0;
+// ── observation + UI visibility ────────────────────────────
+let uiTimer = 0;
 function showUI() {
   body.classList.add('ui');
   clearTimeout(uiTimer);
   uiTimer = setTimeout(() => { if (!$('controls').matches(':hover') && $('worlds').hidden) body.classList.remove('ui'); }, 2600);
 }
-const onUI = (e) => e.target.closest && e.target.closest('#controls, .corner');
+// The hand: moving cuts through the piece (force field + a click when crossing a strong
+// edge of the photo); a still press (~380 ms) collapses the area back to the photograph.
+let holdTimer = 0;
+const onUI = (e) => e.target.closest && e.target.closest('#controls, .corner, #mixer');
 function move(e) {
   const P = app.pointer, now = performance.now();
-  const dt = Math.max(0.001, (now - P.lt) / 1000);
+  const dt = Math.max(0.001, (now - (P.lt || 0)) / 1000);
   const x = e.clientX, y = e.clientY;
   if (app.state === 'playing' && !onUI(e) && P.lt && dt < 0.2) {
     visuals.force(P.lx, P.ly, x, y, dt);
-    const speed = Math.hypot(x - P.lx, y - P.ly) / dt;
-    const [ix, iy] = visuals.screenToImage(x, y);
-    if (ix >= 0 && iy >= 0 && ix <= 1 && iy <= 1) {
-      audio.cursor(ix, iy, speed);
-      edgeCrossing(P.lx, P.ly, x, y);
-    }
-    P.moved += Math.hypot(x - P.lx, y - P.ly);
+    edgeCrossing(P.lx, P.ly, x, y);
+    P.moved = (P.moved || 0) + Math.hypot(x - P.lx, y - P.ly);
     if (P.moved > 14 && holdTimer && !P.holding) { clearTimeout(holdTimer); holdTimer = 0; }
     if (P.holding) visuals.observe(x, y, true);
   }
   P.lx = x; P.ly = y; P.lt = now; P.x = x; P.y = y;
 }
-/** A soft click whenever the path crosses one of the photo's strong edges. */
 function edgeCrossing(x0, y0, x1, y1) {
   const st = app.st; if (!st) return;
   const steps = Math.min(24, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 4));
@@ -211,28 +246,28 @@ function edgeCrossing(x0, y0, x1, y1) {
     prev = on;
   }
 }
+function release() {
+  const P = app.pointer; P.holding = false;
+  clearTimeout(holdTimer); holdTimer = 0;
+  visuals.observe(P.x || 0, P.y || 0, false);
+}
 addEventListener('pointermove', (e) => { move(e); if (e.pointerType === 'mouse') showUI(); }, { passive: true });
 addEventListener('pointerdown', (e) => {
-  if (!app.paused) audio.unlock();
+  if (!app.paused) audio.unlock();     // first tap unlocks audio (iOS) — but never un-pauses
   if (app.awaitTap) { const r = app.awaitTap; app.awaitTap = null; r(); }
-  const P = app.pointer; P.down = true; P.moved = 0; P.lx = e.clientX; P.ly = e.clientY; P.lt = performance.now();
+  const P = app.pointer; P.moved = 0; P.lx = P.x = e.clientX; P.ly = P.y = e.clientY; P.lt = performance.now();
   showUI();
   if (app.state !== 'playing' || onUI(e)) return;
   clearTimeout(holdTimer);
-  // a still press reveals the photograph under the finger
-  holdTimer = setTimeout(() => { holdTimer = 0; P.holding = true; visuals.observe(P.x ?? e.clientX, P.y ?? e.clientY, true); }, 380);
-  P.x = e.clientX; P.y = e.clientY;
+  holdTimer = setTimeout(() => { holdTimer = 0; P.holding = true; visuals.observe(P.x, P.y, true); }, 380);
 });
-function release() {
-  const P = app.pointer; P.down = false; P.holding = false;
-  clearTimeout(holdTimer); holdTimer = 0;
-  visuals.observe(P.x, P.y, false);
-  audio.cursorIdle();
-}
 addEventListener('pointerup', release);
 addEventListener('pointercancel', release);
 document.addEventListener('mouseleave', () => { release(); app.pointer.lt = 0; });
-addEventListener('keydown', (e) => { if (app.state === 'playing' && e.code === 'Space') { e.preventDefault(); togglePause(); } });
+addEventListener('keydown', (e) => {
+  if (app.state !== 'playing') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+});
 
 // ── controls ───────────────────────────────────────────────
 async function togglePause() {
@@ -255,133 +290,224 @@ $('b-new').addEventListener('click', async () => {
 $('b-vol').addEventListener('input', (e) => audio.setVolume(+e.target.value));
 if (!Recorder.supported()) $('b-rec').hidden = true;
 $('b-rec').addEventListener('click', () => (recorder.active ? stopRecording() : startRecording()));
-function startRecording() { if (!audio.recordDest) return; recorder.start($('gl'), audio.recordDest.stream); $('b-rec').classList.add('on'); }
+function startRecording() {
+  if (!audio.recordDest) return;
+  recorder.start($('gl'), audio.recordDest.stream);
+  $('b-rec').classList.add('on');
+}
 async function stopRecording() {
   $('b-rec').classList.remove('on'); $('b-rec').textContent = 'rec';
   await recorder.stop(`photo-to-sound-${app.analysis?.signature || 'piece'}`);
 }
 
-// hidden selector (click the vocabulary, bottom right): choose which layer leads
+// hidden world selector (click the world name, bottom right)
 $('r-world').addEventListener('click', () => {
   const ul = $('worlds');
   if (!ul.hidden) { ul.hidden = true; return; }
   ul.innerHTML = '';
-  for (const w of ['auto', ...LAYERS]) {
+  for (const w of ['auto', ...WORLDS]) {
     const li = document.createElement('li'), b = document.createElement('button');
-    b.textContent = w;
-    if ((w === 'auto' && !visuals.forced) || w === visuals.forced) b.classList.add('on');
-    b.addEventListener('click', () => { visuals.forceLead(w === 'auto' ? null : w); ul.hidden = true; updateWorldLabel(); });
+    b.textContent = w.toLowerCase();
+    if ((w === 'auto' && !app.manualWorld) || w === app.manualWorld) b.classList.add('on');
+    b.addEventListener('click', () => { switchWorld(w === 'auto' ? null : w); ul.hidden = true; });
     li.appendChild(b); ul.appendChild(li);
   }
   ul.hidden = false;
 });
-function updateWorldLabel(plan) {
-  const p = plan || app.piece?.pass(0); if (!p) return;
-  const v = visuals.forced ? [visuals.forced, ...p.vocab.filter((x) => x !== visuals.forced).slice(0, 2)] : p.vocab;
-  $('r-world').textContent = v.join(' · ');
+function switchWorld(world) {
+  if (!app.analysis || !app.choice) return;
+  app.manualWorld = world;
+  const auto = chooseWorlds(app.analysis.features, app.analysis.seed);
+  const c = { ...auto };
+  if (world) overrideChoice(c, world);
+  app.choice = c;
+  visuals.setWorlds(c.primary, c.secondary, c.accent);
+  app.composer?.setWorlds(c.primary, c.secondary, c.accent);
+  updateWorldLabel();
+}
+function updateWorldLabel() {
+  const c = app.choice; if (!c) return;
+  $('r-world').textContent = `${c.primary} × ${c.secondary}`;
+}
+
+// ── sound debug mixer (M) ──────────────────────────────────
+const LAYER_INFO = {
+  KICK: 'sine kick, pitch drop',
+  SUB: 'low sine: drone or gated pulses',
+  CLICK: 'v1 digital clicks',
+  NOISE: 'short gated noise bursts',
+  DATA: 'image rows as data / dial pulses',
+  GLITCH: 'white flash + digital glitch',
+  TONE: 'one low sine interval (after collapse)',
+};
+const mixer = { rows: {}, open: false };
+function buildMixer() {
+  const box = $('mx-rows'); box.innerHTML = '';
+  for (const L of LAYERS) {
+    const row = document.createElement('div'); row.className = 'mx-row';
+    row.innerHTML = `<span class="mx-dot"></span><span class="mx-name">${L}</span><span class="mx-desc">${LAYER_INFO[L]}</span><span class="mx-meter"><i></i></span><button title="mute">M</button><button title="solo">S</button>`;
+    const [mBtn, sBtn] = row.querySelectorAll('button');
+    mBtn.addEventListener('click', () => { audio.setMute(L, !audio.mute[L]); mBtn.classList.toggle('on', !!audio.mute[L]); });
+    sBtn.addEventListener('click', () => { audio.setSolo(L, !audio.solo[L]); sBtn.classList.toggle('on', !!audio.solo[L]); });
+    box.appendChild(row);
+    mixer.rows[L] = { row, dot: row.querySelector('.mx-dot'), bar: row.querySelector('.mx-meter i') };
+  }
+}
+function toggleMixer() { mixer.open = !mixer.open; $('mixer').hidden = !mixer.open; }
+buildMixer();
+addEventListener('keydown', (e) => { if (e.key === 'm' || e.key === 'M') { if (!e.target.closest || !e.target.closest('input')) toggleMixer(); } });
+$('r-title').addEventListener('click', toggleMixer);
+function updateMixer() {
+  if (!mixer.open) return;
+  const lv = audio.levels(), act = audio.activeLayers(0.15);
+  const inPiece = app.composer ? app.composer.layerSet : [];
+  for (const L of LAYERS) {
+    const r = mixer.rows[L];
+    r.row.classList.toggle('off', !inPiece.includes(L));
+    r.dot.classList.toggle('hit', act.includes(L));
+    r.bar.style.width = Math.min(100, (lv[L] || 0) * 260) + '%';
+  }
+  const sounding = audio.activeLayers(2).length;
+  $('mx-count').textContent = `${sounding}/5 sounding · ${inPiece.filter((L) => L !== 'TONE').length} in this piece`;
 }
 
 // ── frame loop ─────────────────────────────────────────────
-let last = performance.now(), lastReadout = 0, lastPass = 0;
+let last = performance.now(), lastReadout = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   const a = app.analysis;
-  if (app.state === 'reading' || app.state === 'playing') app.intro = Math.min(1, app.intro + dt * 1.6);
+  let s = { dt, playing: !app.paused, form: 0, cohere: 0, energy: 0, brk: 0, stepF: 0, beatPhase: 0, intro: 0 };
+
+  if (app.state === 'reading' || app.state === 'playing') {
+    app.intro = Math.min(1, app.intro + dt * 1.6);
+    s.intro = app.intro;
+  }
   if (app.state === 'reading') {
     app.readT += dt;
     const p = app.readT / app.readDur;
-    for (const [at, line] of readingLines(a, app.st)) if (p >= at && !readoutLines.includes(line)) pushReadout(line);
+    for (const [at, line] of readingLines(a)) if (p >= at && !readoutLines.includes(line)) pushReadout(line);
   }
-  let state = null, barsF = 0;
-  if (app.state === 'playing' && app.piece) {
-    barsF = audio.barsAt();
-    state = app.piece.state(barsF);
-    if (state.pass !== lastPass) { lastPass = state.pass; updateWorldLabel(state.plan); }
+
+  let pos = null;
+  if (app.state === 'playing' && audio.stepDur) {
+    pos = audio.position();
+    const C = app.composer, barF = pos.barF, loopBarF = pos.loopBarF;
+    // form: the photograph crosses over during the first bars, then stays crossed
+    app.form = Math.max(app.form, smoothstep(0.25, 6, barF));
+    // the collapse: on the big glitch the full image snaps back for one bar (once per loop)
+    const CB = C.collapseBar, fall = C.sections[3], sil = C.sections[4];
+    const cohere = smoothstep(CB - 0.02, CB + 0.02, loopBarF) * (1 - smoothstep(CB + 0.85, CB + 1.3, loopBarF));
+    // falling away: the accent world takes over softly, then everything fades to black
+    const brk = smoothstep(fall.start + 0.5, fall.start + 3, loopBarF) * (1 - smoothstep(sil.start - 2, sil.start, loopBarF));
+    const fade = smoothstep(sil.start, sil.start + sil.bars - 2, loopBarF);
+    app.energy += (pos.section.energy - app.energy) * Math.min(1, dt * 0.8);
+    s = { ...s, form: app.form, cohere, brk, fade, energy: app.energy, stepF: pos.stepF, beatPhase: pos.beatPhase };
+    // audio events → visuals (against the heard clock)
     for (const ev of audio.drain(audio.heardTime())) {
       visuals.trigger(ev);
-      if (ev.type === 'click' || ev.type === 'rim' || ev.type === 'stutter') app.ticks.push({ x: ev.x, y: ev.y, t: now });
+      if (ev.type === 'click' || ev.type === 'stutter') app.ticks.push({ x: ev.x, y: ev.y, t: now });
     }
   }
-  visuals.frame({ dt, playing: !app.paused, intro: app.intro, state, stepF: barsF * STEPS, beatPhase: (barsF * 4) % 1 });
-  drawOverlay(now, state, barsF);
-  if (now - lastReadout > 66) { lastReadout = now; updateCorners(state, barsF); }
+  visuals.frame(s);
+  drawOverlay(now, pos);
+
+  if (now - lastReadout > 66) { lastReadout = now; updateCorners(pos); updateMixer(); }
 }
 requestAnimationFrame(frame);
 
-function updateCorners(st, barsF) {
-  if (!st) return;
-  $('r-sec').textContent = `${String(st.si + 1).padStart(2, '0')} ${st.section} ${String(st.sb + 1).padStart(2, '0')}/${st.bars} · T ${st.tension.toFixed(2)}`;
-  $('r-pos').textContent = `bar ${String(Math.floor(barsF) + 1).padStart(3, '0')} · step ${String(Math.floor(barsF * STEPS) % STEPS + 1).padStart(2, '0')} · pass ${st.pass + 1}`;
+function updateCorners(pos) {
+  if (!pos) return;
+  const sec = pos.section;
+  $('r-sec').textContent = `${String(sec.index + 1).padStart(2, '0')} ${sec.name} ${String(sec.barInSection + 1).padStart(2, '0')}/${sec.bars}`;
+  $('r-pos').textContent = `bar ${String(pos.loopBar + 1).padStart(2, '0')}/${app.composer.loopBars} · step ${String(pos.step + 1).padStart(2, '0')}`;
   if (recorder.active) $('b-rec').textContent = `rec ${recorder.seconds.toFixed(0)}s`;
-  const [ix, iy] = visuals.screenToImage(app.pointer.x || 0, app.pointer.y || 0);
-  $('r-xy').textContent = `${app.mood?.name || ''} · x ${clamp(ix).toFixed(3)} y ${clamp(iy).toFixed(3)}`;
+  const o = visuals.obs;
+  const r = visuals.imageRect();
+  const ix = clamp((app.pointer.x - r.x) / r.w), iy = clamp((app.pointer.y - r.y) / r.h);
+  $('r-xy').textContent = `x ${ix.toFixed(3)}  y ${iy.toFixed(3)}  ψ ${(1 - o.s).toFixed(2)}`;
 }
 
-// ── 2D overlay: scan line, face brackets, step ticks, hold circle ──
-function drawOverlay(now, st, barsF) {
+// ── 2D overlay: scan line, detections, read-head, observer ─
+function drawOverlay(now, pos) {
   const W = innerWidth, H = innerHeight;
   octx.clearRect(0, 0, W, H);
   const a = app.analysis;
   if (!a || app.state === 'landing') return;
   const r = visuals.imageRect();
   octx.lineWidth = 1;
+
   if (app.state === 'reading') {
-    const p = clamp(app.readT / app.readDur), y = r.y + r.h * p;
+    const p = clamp(app.readT / app.readDur);
+    const y = r.y + r.h * p;
+    // scan line + faint after-glow
     const g = octx.createLinearGradient(0, y - 40, 0, y);
     g.addColorStop(0, 'rgba(127,230,255,0)'); g.addColorStop(1, 'rgba(127,230,255,0.08)');
     octx.fillStyle = g; octx.fillRect(r.x, y - 40, r.w, 40);
     octx.fillStyle = 'rgba(235,250,255,0.9)'; octx.fillRect(r.x - 12, y, r.w + 24, 1);
     octx.font = '9px ui-monospace, Menlo, monospace'; octx.fillStyle = 'rgba(232,238,242,0.45)';
     octx.fillText((p * a.height * 8 | 0).toString().padStart(4, '0'), r.x + r.w + 16, y + 3);
-    // what the machine finds, as the line passes
-    if (app.st) {
-      octx.strokeStyle = 'rgba(232,238,242,0.5)';
-      for (const c of app.st.corners.slice(0, 60)) { if (c.y > p) continue; const [x, yy] = visuals.imageToScreen(c.x, c.y); octx.strokeRect(x - 1.5, yy - 1.5, 3, 3); }
-      octx.strokeStyle = 'rgba(127,230,255,0.55)';
-      for (const s of app.st.segments) { if (Math.min(s.y1, s.y2) > p) continue; const [x0, y0] = visuals.imageToScreen(s.x1, s.y1), [x1, y1] = visuals.imageToScreen(s.x2, s.y2); octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke(); }
+    // light points as they are passed
+    octx.strokeStyle = 'rgba(232,238,242,0.55)';
+    for (const pt of a.points.slice(0, 16)) {
+      if (pt.y > p) continue;
+      const [x, yy] = visuals.imageToScreen(pt.x, pt.y);
+      octx.beginPath(); octx.moveTo(x - 4, yy); octx.lineTo(x + 4, yy); octx.moveTo(x, yy - 4); octx.lineTo(x, yy + 4); octx.stroke();
     }
   }
+  // face brackets (once known)
   const fb = a.features.faceBox;
-  if (fb && (app.state === 'reading' || (st && st.si === 0))) {
+  if (fb && (app.state === 'reading' || (app.form < 0.6))) {
     const [x0, y0] = visuals.imageToScreen(fb.x, fb.y), [x1, y1] = visuals.imageToScreen(fb.x + fb.w, fb.y + fb.h);
     const L = Math.min(14, (x1 - x0) * 0.2);
-    octx.strokeStyle = 'rgba(127,230,255,0.7)';
+    octx.strokeStyle = `rgba(127,230,255,${0.8 * (1 - app.form)})`;
     octx.beginPath();
-    for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) { octx.moveTo(cx, cy + sy * L); octx.lineTo(cx, cy); octx.lineTo(cx + sx * L, cy); }
+    for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+      octx.moveTo(cx, cy + sy * L); octx.lineTo(cx, cy); octx.lineTo(cx + sx * L, cy);
+    }
     octx.stroke();
   }
-  if (app.state === 'playing' && st) {
-    // the 16 steps of the bar and the tension of the piece, as hairlines under the image
-    const ty = r.y + r.h + 9, step = Math.floor(barsF * STEPS) % STEPS;
+
+  if (app.state === 'playing' && pos) {
+    const fade = 0.55;
+    // read-head: which rows (band) and which columns the sequencer reads
+    const win = readWindow(pos.loopBar, a.grid, app.composer.loopBars);
+    const yb0 = r.y + win.band / a.grid.rows * r.h, yb1 = r.y + (win.band + 8) / a.grid.rows * r.h;
+    octx.strokeStyle = `rgba(232,238,242,${0.35 * fade})`;
+    octx.beginPath(); octx.moveTo(r.x - 10, yb0); octx.lineTo(r.x - 4, yb0); octx.lineTo(r.x - 4, yb1); octx.lineTo(r.x - 10, yb1); octx.stroke();
+    const ty = r.y + r.h + 9;
     for (let i = 0; i < STEPS; i++) {
-      octx.fillStyle = i === step ? 'rgba(235,250,255,0.9)' : 'rgba(232,238,242,0.12)';
-      octx.fillRect(Math.round(r.x + (i + 0.5) / STEPS * r.w), ty, 1, i === step ? 6 : 3);
+      const x = r.x + (win.cols[i] + 0.5) / a.grid.cols * r.w;
+      const on = i === pos.step;
+      octx.fillStyle = on ? 'rgba(235,250,255,0.9)' : `rgba(232,238,242,${0.18 * fade})`;
+      octx.fillRect(Math.round(x), ty, 1, on ? 6 : 3);
     }
-    octx.fillStyle = 'rgba(127,230,255,0.35)';
-    octx.fillRect(r.x, ty + 9, r.w * st.tension, 1);
+    // clicks leave a tiny cross at their source pixel for a moment
     app.ticks = app.ticks.filter((t) => now - t.t < 220);
     for (const t of app.ticks) {
-      if (t.x === undefined) continue;
-      const [x, y] = visuals.imageToScreen(t.x, t.y), al = 1 - (now - t.t) / 220;
-      octx.strokeStyle = `rgba(255,255,255,${0.55 * al})`;
+      const [x, y] = visuals.imageToScreen(t.x, t.y);
+      const al = 1 - (now - t.t) / 220;
+      octx.strokeStyle = `rgba(255,255,255,${0.6 * al})`;
       octx.beginPath(); octx.moveTo(x - 3, y); octx.lineTo(x + 3, y); octx.moveTo(x, y - 3); octx.lineTo(x, y + 3); octx.stroke();
     }
+    // observer: a hairline circle and coordinates
     const o = visuals.obs;
     if (o.s > 0.02) {
       const rad = visuals.shared.uObsR.value / 2 * H;
-      const cx = (o.sx / visuals.view.aspect + 1) / 2 * W, cy = (1 - o.sy) / 2 * H;
+      const [cx, cy] = [(o.sx / visuals.view.aspect + 1) / 2 * W, (1 - o.sy) / 2 * H];
       octx.strokeStyle = `rgba(232,238,242,${0.22 * o.s})`;
       octx.beginPath(); octx.arc(cx, cy, rad, 0, Math.PI * 2); octx.stroke();
-      octx.fillStyle = `rgba(232,238,242,${0.5 * o.s})`; octx.font = '9px ui-monospace, Menlo, monospace';
+      octx.fillStyle = `rgba(232,238,242,${0.5 * o.s})`;
+      octx.font = '9px ui-monospace, Menlo, monospace';
       octx.fillText(`ψ→|x⟩ ${clamp((cx - r.x) / r.w).toFixed(3)} ${clamp((cy - r.y) / r.h).toFixed(3)}`, cx + rad * 0.72 + 6, cy - rad * 0.72);
     }
   }
 }
 
-// ── deep links: #demo=ii  #layer=fragments  #bar=40 ────────
+// ── debug / deep links: #demo=ii  #world=RASTER ────────────
 if (hashParams.get('demo')) {
   const d = DEMOS.find((x) => x.id === hashParams.get('demo'));
   if (d) setTimeout(() => begin(d.make(), d.name, demoBytes(d)), 300);
 }
+// expose for debugging in the console
 window.__p2s = { app, audio, visuals, recorder };

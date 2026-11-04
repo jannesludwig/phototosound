@@ -4,7 +4,7 @@
 //  a velocity. The moving cursor injects velocity along its path (and a
 //  radial push), scaled by its speed; springs pull everything back with
 //  a little overshoot, neighbour diffusion smears the wake. Uploaded each
-//  frame as a half-float texture that every layer samples (fieldAt()).
+//  frame as a byte texture that every layer samples (fieldAt()).
 // ─────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 
@@ -15,8 +15,9 @@ export class ForceField {
     this.dx = new Float32Array(n); this.dy = new Float32Array(n);
     this.vx = new Float32Array(n); this.vy = new Float32Array(n);
     this.tmpx = new Float32Array(n); this.tmpy = new Float32Array(n);
-    this.data = new Uint16Array(n * 4);
-    this.tex = new THREE.DataTexture(this.data, gw, gh, THREE.RGBAFormat, THREE.HalfFloatType);
+    // bytes, not half floats: works everywhere (older Safari / iOS included). 127 = no displacement.
+    this.data = new Uint8Array(n * 4).fill(127);
+    this.tex = new THREE.DataTexture(this.data, gw, gh, THREE.RGBAFormat, THREE.UnsignedByteType);
     this.tex.minFilter = this.tex.magFilter = THREE.LinearFilter;
     this.tex.needsUpdate = true;
     this.rect = new THREE.Vector4(-2, -1.1, 4, 2.2);
@@ -70,8 +71,8 @@ export class ForceField {
     }
     this.energy = e;
     if (e > 1e-4 || this.dirty) {
-      const D = this.data, H = THREE.DataUtils.toHalfFloat;
-      for (let n = 0; n < gw * gh; n++) { D[n * 4] = H(dx[n]); D[n * 4 + 1] = H(dy[n]); D[n * 4 + 2] = H(Math.hypot(vx[n], vy[n])); }
+      const D = this.data, enc = (v) => Math.max(0, Math.min(254, Math.round(127 + v / 0.4 * 127)));
+      for (let n = 0; n < gw * gh; n++) { D[n * 4] = enc(dx[n]); D[n * 4 + 1] = enc(dy[n]); }
       this.tex.needsUpdate = true;
       this.dirty = e > 1e-4;
     }

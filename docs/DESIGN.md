@@ -1,3 +1,5 @@
+> **Note:** this is the round-2 design and is superseded. Round 3 returned to v1 and reduced it; see `docs/ROUND3.md` and `docs/V1_VS_V2.md`.
+
 # Design: Photo to Sound, round 2
 
 Problem from round 1: every photo went through one of six fixed templates.

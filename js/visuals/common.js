@@ -27,22 +27,16 @@ uniform float uSpeed;     // seeded speed multiplier
 uniform vec3  uAccent;    // one cold accent colour
 uniform vec4  uSparks[8]; // xy image space, z start time, w kind (1 click 2 sine 3 noise 4 stutter)
 uniform sampler2D uImage;
-uniform sampler2D uField;  // force field: rg = displacement (world units)
+uniform sampler2D uField;  // cursor force field, displacement encoded in rg (bytes)
 uniform vec4  uFieldRect;  // field covers world rect (x0, y0, w, h)
-uniform float uTension;   // score tension 0..1
-uniform float uFall;      // afterglow: elements fall away 0..1
-uniform float uSig;       // signature moment progress 0..1
-uniform float uSigKind;   // 0 RECONSTRUCT 1 GRID 2 NETWORK 3 SWEEP 4 STRATA
+uniform float uJump;      // counts sound events: elements tunnel (jump) when it changes
 
-// The cursor's force field: a wake with inertia and spring-back, sampled by every layer.
+// The hand's force field: a wake with inertia and spring-back, sampled by every world.
 vec2 fieldAt(vec2 w) {
   vec2 uv = (w - uFieldRect.xy) / uFieldRect.zw;
   if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec2(0.0);
-  return texture2D(uField, uv).rg;
+  return (texture2D(uField, uv).rg * 255.0 - 127.0) / 127.0 * 0.4;
 }
-float sigOn(float kind) { return uSig * (1.0 - step(0.5, abs(uSigKind - kind))); }
-// GRID signature: snap a world position to the grid
-vec2 gridSnap(vec2 w, float cells) { float c = 2.0 / cells; return (floor(w / c) + 0.5) * c; }
 
 float hash11(float p) { p = fract(p * .1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float hash21(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -94,8 +88,7 @@ export function makeSharedUniforms() {
     uBeat: { value: 0 }, uStep: { value: 0 }, uEnergy: { value: 0 }, uBreak: { value: 0 },
     uSpeed: { value: 1 }, uAccent: { value: new THREE.Color(0.5, 0.9, 1) },
     uSparks: { value: sparks }, uImage: { value: null },
-    uField: { value: null }, uFieldRect: { value: new THREE.Vector4(-2, -1, 4, 2) },
-    uTension: { value: 0 }, uFall: { value: 0 }, uSig: { value: 0 }, uSigKind: { value: -1 },
+    uField: { value: null }, uFieldRect: { value: new THREE.Vector4(-2, -1, 4, 2) }, uJump: { value: 0 },
   };
 }
 
@@ -109,7 +102,7 @@ export function makeMaterial(shared, { vertex, fragment, uniforms = {}, blending
     uniforms: u,
     vertexShader: GLSL_COMMON + vertex,
     fragmentShader: GLSL_COMMON + fragment,
-    transparent: true, depthTest: false, depthWrite: false, blending, side,   // winding flips with the image's y axis
+    transparent: true, depthTest: false, depthWrite: false, blending, side,
   });
   if (extensions) mat.extensions = extensions;
   return mat;
@@ -131,12 +124,8 @@ export class World {
   }
   /** Called when the viewport changes. */
   resize() {}
-  /** Per frame. s: { t, dt, tension, section, si, sp, signature, sigName, fall, kick, … } */
+  /** Per frame. state: { t, dt, energy, brk, form, pos, ... } */
   update() {}
-  /** A score event that concerns this layer (reveal, detach, flash, …). */
-  onEvent() {}
-  /** A new loop pass begins: forget per-element states. */
-  resetPass() {}
   dispose() {
     this.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     for (const m of this.materials) m.dispose();

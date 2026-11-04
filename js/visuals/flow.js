@@ -22,7 +22,6 @@ void main() {
   vCol = mix(pc * 1.9 + 0.08, uAccent, 0.5 * step(0.96, fract(position.z * 97.13)));
   vA = aAlpha * uMix * (1.0 - coh) * (0.4 + 0.6 * smoothstep(0.02, 0.4, l)) * (0.8 + uKick * 0.6);
   vec2 w = position.xy + fieldAt(position.xy) * 1.4;
-  w.y -= uFall * uFall * 0.3;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(w, 0.0, 1.0);  // (z = id, not depth)
 }`;
 const FRAG = /* glsl */`
@@ -87,13 +86,24 @@ export class Flow extends World {
     out[1] = (F.fy[i00] * (1 - tx) + F.fy[i10] * tx) * (1 - ty) + (F.fy[i01] * (1 - tx) + F.fy[i11] * tx) * ty;
   }
 
+  /** Tunneling: on glitch / data events a few streaks jump far along their field line. */
+  onEvent(ev) {
+    if (ev.type !== 'glitch' && ev.type !== 'data') return;
+    const v = [0, 0];
+    for (let k = 0; k < this.n * 0.04; k++) {
+      const i = Math.floor(this.rng() * this.n);
+      this.sample(this.x[i], this.y[i], v);
+      this.x[i] += v[0] * 0.18; this.y[i] += v[1] * 0.18;
+    }
+  }
+
   update(s) {
     const dt = s.dt * (s.playing ? 1 : 0.15);
     const hx = s.view.half.x, hy = s.view.half.y;
     // rolling pulse: a surge right after each beat, plus the kick itself
     const pulse = 0.5 + 0.9 * Math.pow(1 - (s.beatPhase || 0), 3) + s.kick * 0.9;
     this.surge += (pulse - this.surge) * Math.min(1, s.dt * 10);
-    const base = 0.16 * this.ctx.params.speed * (0.45 + 0.75 * s.tension) * this.surge;
+    const base = 0.16 * this.ctx.params.speed * (0.45 + 0.75 * s.energy) * this.surge;
     const scatter = s.noise * 0.012;
     const v = [0, 0];
     const P = this.pos, A = this.alpha, rng = this.rng;

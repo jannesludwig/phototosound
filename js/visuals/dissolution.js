@@ -16,6 +16,7 @@ uniform float uDis;     // dissolve amount 0..1
 uniform float uSpacing; // particle spacing in device px
 uniform float uCamZ;
 uniform vec2  uCenter;  // centre of gravity (face) in image space
+uniform float uGhost;   // 1 = the superposed ghost copy of the field
 varying vec4 vColor;
 varying float vD;
 
@@ -45,8 +46,12 @@ void main() {
   float on = step(0.8, hash11(band * 1.37 + floor(uTime * 13.0)));
   q.x += (hash11(band + floor(uTime * 29.0)) - 0.5) * 0.14 * uNoise * on * (0.25 + d);
 
-  q += fieldAt(q) * 1.4;                                    // pushed by the hand, springs back
-  q.y -= uFall * uFall * d * (0.2 + seed * 0.6);
+  // tunneling: on every glitch / data event a third of the free particles JUMP (no in-between)
+  vec2 jump = (vec2(hash11(seed * 31.7 + uJump), hash11(seed2 * 17.3 + uJump * 1.31)) - 0.5) * 0.09 * d;
+  q += jump * step(0.66, hash11(seed * 5.1 + floor(uJump)));
+  // superposition: some particles are also somewhere else, faintly, flickering by chance
+  q += uGhost * (vec2(hash11(seed * 7.7), hash11(seed2 * 3.3)) - 0.5) * 0.12 * (0.3 + d);
+  q += fieldAt(q) * 1.4;                                        // the hand pushes, springs back
   float flash = sparks(home, 34.0, 0.45);
   float z = (seed2 - 0.5) * 0.5 * d;
   vec4 mv = modelViewMatrix * vec4(q, z, 1.0);
@@ -64,6 +69,7 @@ void main() {
   // once free, only the light survives: dark particles fade into the black
   float keep = mix(1.0, 0.05 + 0.7 * smoothstep(0.08, 0.6, lum) + flash, d);
   float a = uMix * (1.0 - coh * 0.97) * keep;
+  if (uGhost > 0.5) a *= 0.28 * step(0.72, seed2) * step(0.45, hash11(seed * 9.1 + floor(uTime * 24.0)));
   vColor = vec4(c, a);
 }`;
 
@@ -81,7 +87,7 @@ void main() {
   gl_FragColor = vec4(vColor.rgb * a, 1.0);
 }`;
 
-export class Particles extends World {
+export class Dissolution extends World {
   constructor(ctx) {
     super(ctx);
     const { analysis, quality, params } = ctx;
@@ -126,11 +132,15 @@ export class Particles extends World {
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 100);
     this.mat = this.material({
       vertex: VERT, fragment: FRAG,
-      uniforms: { uDis: { value: 0 }, uSpacing: { value: 4 }, uCamZ: { value: ctx.camZ }, uCenter: { value: new THREE.Vector2(fc[0] * 2 - 1, 1 - fc[1] * 2) } },
+      uniforms: { uDis: { value: 0 }, uSpacing: { value: 4 }, uCamZ: { value: ctx.camZ }, uCenter: { value: new THREE.Vector2(fc[0] * 2 - 1, 1 - fc[1] * 2) }, uGhost: { value: 0 } },
     });
     this.points = new THREE.Points(geo, this.mat);
     this.points.frustumCulled = false;
     this.group.add(this.points);
+    // the superposed ghost: same particles, another place, faint
+    this.ghostMat = this.material({ vertex: VERT, fragment: FRAG, uniforms: { uDis: this.mat.uniforms.uDis, uSpacing: this.mat.uniforms.uSpacing, uCamZ: { value: ctx.camZ }, uCenter: this.mat.uniforms.uCenter, uGhost: { value: 1 } } });
+    const ghost = new THREE.Points(geo, this.ghostMat); ghost.frustumCulled = false;
+    this.group.add(ghost);
     this.dis = 0;
   }
 
@@ -141,9 +151,7 @@ export class Particles extends World {
 
   update(s) {
     // how far the image has come apart follows the form of the piece
-    // dissolves with the tension; RECONSTRUCT brings every particle home
-    const rec = s.sigName === 'RECONSTRUCT' ? s.signature : 0;
-    const target = (0.18 + 0.62 * s.tension) * (1 - rec);
+    const target = s.form * (0.22 + 0.58 * s.energy) + s.brk * 0.25;
     this.dis += (target - this.dis) * Math.min(1, s.dt * 0.6);
     this.mat.uniforms.uDis.value = this.dis + s.kick * 0.02;
   }
