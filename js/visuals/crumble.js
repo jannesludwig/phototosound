@@ -16,7 +16,7 @@ uniform float uRelease, uPt;
 varying vec3 vCol;
 varying float vA;
 void main() {
-  float amount = 0.08 + uDecay * 0.8 + uRelease * 0.5;
+  float amount = uDecay * 0.5 + uRelease * 0.3 * uDecay;     // only as the image is consumed
   float on = step(aSeed.y, amount);
   float rate = 0.05 + aSeed.x * 0.09;
   float cyc = fract(uTime * rate + aSeed.x * 7.13);

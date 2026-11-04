@@ -170,7 +170,7 @@ export class Composer {
     }
 
     // ── HEART ──
-    for (const h of this.heart(b)) push(h.step, 'heart', { vel: h.vel, lub: h.lub, freq: root, x: F.x, y: F.y });
+    for (const h of this.heart(b)) push(h.step, 'heart', { vel: h.vel, lub: h.lub, n: b * 2 + (h.step >= 8 ? 1 : 0), freq: root, x: F.x, y: F.y });
 
     // ── PEAKS: the polyrhythm of the topography; a KICK where a peak meets the heart ──
     const beats = this.heart(b), pulses = this.peakPulses(b);

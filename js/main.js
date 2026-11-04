@@ -144,7 +144,7 @@ async function begin(src, name, signatureBytes = null) {
 
   audio.loadPiece(composer, analysis, P);
   visuals.stepDur = 60 / P.bpm / 4;
-  visuals.beginMap(map, app.st);
+  visuals.beginMap(map, app.st, composer.org);
   app.marks = map.marks.map((m, i) => ({ ...m, id: (m.kind[0].toUpperCase()) + i }));
   if (!audio.running) {
     const ok = await audio.unlock();
@@ -316,10 +316,13 @@ const SOUND_INFO = {
   NOISE: 'overload: gated noise bursts', GLITCH: 'hardest edges · collapses', TONE: 'one low interval (decay)', CRASH: 'the end: the image is consumed',
 };
 const VISUAL_INFO = {
-  TERRAIN: 'the whole terrain mesh', CONTOURS: 'contour lines (3 densities)', WIREFRAME: 'wireframe state', RIDGES: 'ridge hatching on edges',
-  SCAN: 'scan line + afterglow', FLARES: 'local flares per sound event', DEFORM: 'ripples, spikes, tears, erosion', DECAY: 'consumption: crumbling, breaking',
-  'EDGE FLASH': 'hard edges flash (frames)', ORBIT: 'rings at the focal point (sub)', CRUMBLE: 'border particles drift away',
-  ANNOTATIONS: 'labels on the map', CRASH: 'the final white flash', HAND: 'cursor force field',
+  TERRAIN: 'the whole terrain mesh', CONTOURS: 'contour lines, photo colours', WIREFRAME: 'wireframe state', RIDGES: 'ridge hatching on edges',
+  SCAN: 'scan line (reading)', FLARES: 'local light per sound event', DEFORM: 'ripples, spikes, tears', DECAY: 'erosion front, broken lines',
+  'PHOTO CORE': 'photo near the epicenter → pixels', PIXELS: 'single photo pixels, glow on sound', REVEAL: 'photo patch where a sound is',
+  HEART: 'rings at the epicenter, lub-dub', WAVES: 'pulse waves across the lines', PEAKS: 'awake summits, their pulses',
+  INTERFERENCE: 'where two waves cross', NERVES: 'circuit traces + impulses', MEMORY: 'ghost of the scan where it heard',
+  EROSION: 'light draining downhill', SUPERPOSITION: 'ghost states → collapse', 'EDGE FLASH': 'hard edges flash (frames)',
+  CRUMBLE: 'border particles (decay)', ANNOTATIONS: 'labels on the map', CRASH: 'the final white flash', HAND: 'cursor force field',
 };
 const mixer = { rows: {}, open: false };
 function mixRow(box, name, info, isSound) {
@@ -459,7 +462,7 @@ function drawOverlay(now, pos, st) {
     if (st.scan.mapping && m.x > st.scan.reveal) continue;
     const [x, y, z] = visuals.project(m.x, m.y, 0.01);
     if (z > 1) continue;
-    const near = Math.abs(m.x - st.scan.x) < 0.04;                              // under the scan: it sounds
+    const near = st.scan.mapping && Math.abs(m.x - st.scan.x) < 0.04;            // under the scan: it sounds
     const freq = P.root * (2 + Math.round(m.h * 6));
     const a1 = (near ? 0.85 : 0.38) * al * flick;
     octx.strokeStyle = `rgba(232,238,242,${a1})`; octx.fillStyle = `rgba(232,238,242,${a1})`;
@@ -469,10 +472,10 @@ function drawOverlay(now, pos, st) {
     octx.fillText(`h ${m.h.toFixed(2)} · ${freq.toFixed(1)} Hz`, x + 14, y + 2);
   }
   // the scan probe: where the listening line meets the far edge of the map
-  if (visuals.visOn('SCAN')) {
+  if (visuals.visOn('SCAN') && st.scan.alpha > 0.05) {
     const [x, y] = visuals.project(st.scan.x, 0, 0.02);
     const col = app.map.col[Math.min(63, Math.floor(st.scan.x * 64))];
-    octx.fillStyle = `rgba(235,250,255,${0.6 * al})`;
+    octx.fillStyle = `rgba(235,250,255,${0.6 * al * st.scan.alpha})`;
     octx.fillText(`SCAN ${st.scan.x.toFixed(3)} · h̄ ${col.hMean.toFixed(2)} · e ${col.eMax.toFixed(2)}`, x + 6, y - 6);
   }
   // short notes where data, glitches and resonances happen

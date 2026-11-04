@@ -1,25 +1,36 @@
 // ─────────────────────────────────────────────────────────────
 //  visuals/engine.js — renderer and orchestration of the sound map.
 //
-//  One visual language: the terrain (terrain.js) with light add-ons —
-//  edge flashes, the focal orbit, the crumbling border, rare quantum
-//  slicing. Every sound event is dispatched to the layers with its
-//  position (and the height of the map there), so it has a visible
-//  consequence at a specific place. The only full-screen flash is the
-//  crash at the very end. Each layer can be switched off in the mixer.
+//  One visual language: the terrain (terrain.js) and, once the map comes
+//  alive, its systems — the heart and the peaks (orbit.js), the nerves
+//  (nerves.js), erosion (erosion.js) — plus edge flashes and the
+//  crumbling border in decay. Every sound event is dispatched to the
+//  layers with its position, so it has a visible consequence at its
+//  place on the map. Each phase shows at most 3–4 systems. The only
+//  full-screen flash is the crash at the very end. Every layer can be
+//  switched off in the mixer.
 // ─────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { makeSharedUniforms, makeMaterial, toImg } from './common.js';
 import { ForceField } from './field.js';
 import { Terrain } from './terrain.js';
 import { EdgeFlash } from './edges.js';
-import { Orbit } from './orbit.js';
+import { Heart, Peaks } from './orbit.js';
+import { Nerves } from './nerves.js';
+import { Erosion } from './erosion.js';
 import { Crumble } from './crumble.js';
 import { heightAt } from '../map.js';
 
-export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'EDGE FLASH', 'ORBIT', 'CRUMBLE', 'ANNOTATIONS', 'CRASH', 'HAND'];
-const TERRAIN_SHOW = { CONTOURS: 'Contours', WIREFRAME: 'Wire', RIDGES: 'Ridges', SCAN: 'Scan', FLARES: 'Flares', DECAY: 'Decay' };
-const LAYER_OBJ = { TERRAIN: 'terrain', 'EDGE FLASH': 'edges', ORBIT: 'orbit', CRUMBLE: 'crumble' };
+export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'PHOTO CORE', 'PIXELS', 'REVEAL',
+  'HEART', 'WAVES', 'PEAKS', 'INTERFERENCE', 'NERVES', 'MEMORY', 'EROSION', 'SUPERPOSITION', 'EDGE FLASH', 'CRUMBLE', 'ANNOTATIONS', 'CRASH', 'HAND'];
+const TERRAIN_SHOW = { CONTOURS: 'Contours', WIREFRAME: 'Wire', RIDGES: 'Ridges', SCAN: 'Scan', FLARES: 'Flares', DECAY: 'Decay', 'PHOTO CORE': 'Core', PIXELS: 'Pixels', REVEAL: 'Reveal', WAVES: 'Waves', INTERFERENCE: 'Interf', MEMORY: 'Memory', SUPERPOSITION: 'Ghost' };
+const LAYER_OBJ = { TERRAIN: 'terrain', HEART: 'orbit', PEAKS: 'peaks', NERVES: 'nerves', EROSION: 'erosion', 'EDGE FLASH': 'edges', CRUMBLE: 'crumble' };
+// which systems are on screen in each phase (≤ 3–4 clearly visible at once)
+const PHASE_MIX = {
+  READING: { orbit: 0, peaks: 0, nerves: 0 },
+  AWAKENING: { orbit: 1, peaks: 0, nerves: 0 },
+  LIFE: {}, DECAY: {}, END: {},
+};
 
 const FOV = 30;
 const CAM_Z = 1 / Math.tan((FOV / 2) * Math.PI / 180);
@@ -85,14 +96,14 @@ export class Visuals {
   }
 
   /** The analysis is done: build the sound map's layers. */
-  beginMap(map, st) {
-    this.map = map;
+  beginMap(map, st, org) {
+    this.map = map; this.org = org;
     const P = map.params;
     this.shared.uAccent.value.setRGB(...P.accent);
     this.shared.uAmp.value = P.relief; this.shared.uTilt.value = P.tilt;
     this.baseYaw = P.yaw;
-    const ctx = { shared: this.shared, analysis: this.analysis, map, st, quality: this.quality, view: this.view };
-    this.layers = { terrain: new Terrain(ctx), edges: new EdgeFlash(ctx), orbit: new Orbit(ctx), crumble: new Crumble(ctx) };
+    const ctx = { shared: this.shared, analysis: this.analysis, map, st, org, quality: this.quality, view: this.view, waveV: org.waveV, stepDur: this.stepDur };
+    this.layers = { terrain: new Terrain(ctx), nerves: new Nerves(ctx), orbit: new Heart(ctx), peaks: new Peaks(ctx), erosion: new Erosion(ctx), edges: new EdgeFlash(ctx), crumble: new Crumble(ctx) };
     for (const k in this.layers) { const l = this.layers[k]; l.setMix(0); l.resize(this.view); this.scene.add(l.group); }
     this.applyVisuals();
   }
@@ -161,7 +172,7 @@ export class Visuals {
     const U = this.shared, form = U.uForm.value;
     const [ix, iy] = toImg(x, y);
     const h = this.map ? heightAt(this.map, x, y) : 0;
-    const z = ((h - 0.45) * U.uAmp.value * (0.8 + 0.45 * U.uLow.value) * form) + lift;
+    const z = ((h - 0.45) * U.uAmp.value * (0.8 + 0.45 * U.uLow.value) * form * (1 - 0.55 * U.uDecay.value)) + lift;
     let px = ix * this.view.half.x, py = iy * this.view.half.y;
     const yaw = U.uYaw.value * form, c = Math.cos(yaw), s = Math.sin(yaw);
     [px, py] = [c * px - s * py, s * px + c * py];
@@ -250,7 +261,7 @@ export class Visuals {
       const fade = st.fade ?? 1;
       for (const k in this.layers) {
         const l = this.layers[k];
-        const target = (k === 'orbit' && st.section === 'READING' ? 0 : 1) * fade;
+        const target = (PHASE_MIX[st.section]?.[k] ?? 1) * fade;
         l.setMix(l.mix + (target - l.mix) * Math.min(1, dt * 2));
         if (l.mix > 0) l.update(s);
       }
