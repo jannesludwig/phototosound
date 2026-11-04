@@ -166,13 +166,14 @@ export class Terrain extends Layer {
     if (ev.x === undefined) return;
     const h = hAt(ev.x, ev.y);
     switch (ev.type) {
-      case 'click': this.flare(1, ev.x, ev.y, ev.vel, 0.28, 0.07, h, now); break;
-      case 'glitch': this.flare(2, ev.x, ev.y, 1, 0.5, 0.45, h, now); break;
+      case 'click': case 'nerve': this.flare(1, ev.x, ev.y, ev.vel, 0.28, 0.06, h, now); break;
+      case 'glitch': this.flare(2, ev.x, ev.y, 1, 0.5, 0.35, h, now); break;
       case 'noise': this.flare(3, ev.x, ev.y, 1, 0.22, 0.12, h, now); break;
-      case 'data': case 'scanner': this.flare(3, ev.x, ev.y, 0.6, 0.3, 0.06, h, now); break;
+      case 'scanner': case 'memory': this.flare(3, ev.x, ev.y, 0.6, 0.3, 0.05, h, now); break;
       case 'kick': this.flare(4, ev.x, ev.y, ev.vel, 1.3, 0.1, h, now); break;
       case 'res': this.flare(5, ev.x, ev.y, 1, ev.dur * stepDur * 16, 0.3, h, now); break;
-      case 'sub': if (ev.focus) this.flare(5, ev.x, ev.y, 1, 1.6, 0.14, h, now); break;
+      case 'erode': this.flare(5, ev.x, ev.y, 0.6, 0.8, 0.05, h, now); break;
+      case 'interf': this.flare(1, ev.x, ev.y, 1, 0.4, 0.05, h, now); break;
     }
   }
 
@@ -180,10 +181,10 @@ export class Terrain extends Layer {
     const u = this.mat.uniforms, P = this.ctx.map.params;
     u.uScanX.value = s.scan.x; u.uScanDir.value = s.scan.dir; u.uReveal.value = s.scan.reveal; u.uMapping.value = s.scan.mapping ? 1 : 0;
     // wireframe vs contour states over the piece (graphic images keep more wire); kicks flash the wire in
-    const base = { MAPPING: 1, LISTENING: 0.15, INTENSIFY: 0.12, CONSUMPTION: 0.45, END: 0.6 }[s.section] ?? 0.2;
-    const wTarget = Math.min(1, base + P.terraced * 0.3 + s.kick * (s.section === 'INTENSIFY' ? 0.9 : 0.3));
+    const base = { READING: 1, AWAKENING: 0.3, LIFE: 0.06, DECAY: 0.3, END: 0.5 }[s.section] ?? 0.2;
+    const wTarget = Math.min(1, base + P.terraced * 0.3 + s.kick * 0.25);
     this.wire += (wTarget - this.wire) * Math.min(1, s.dt * (wTarget > this.wire ? 12 : 1.5));
-    const fTarget = { MAPPING: 0, LISTENING: 0.25, INTENSIFY: 0.6 + 0.4 * s.energy, CONSUMPTION: 0.4, END: 0.2 }[s.section] ?? 0;
+    const fTarget = { READING: 0, AWAKENING: 0.1, LIFE: 0.15 + 0.5 * s.energy, DECAY: 0.3, END: 0.2 }[s.section] ?? 0;
     this.fine += (fTarget - this.fine) * Math.min(1, s.dt * 0.5);
     u.uWire.value = this.wire; u.uFine.value = this.fine;
     u.uColorAmt.value = 0.18 + 0.35 * s.energy;

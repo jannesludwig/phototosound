@@ -250,7 +250,7 @@ export class Visuals {
       const fade = st.fade ?? 1;
       for (const k in this.layers) {
         const l = this.layers[k];
-        const target = (k === 'terrain' ? 1 : k === 'orbit' ? (st.section === 'MAPPING' ? 0.4 : 1) : 1) * fade;
+        const target = (k === 'orbit' && st.section === 'READING' ? 0 : 1) * fade;
         l.setMix(l.mix + (target - l.mix) * Math.min(1, dt * 2));
         if (l.mix > 0) l.update(s);
       }

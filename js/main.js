@@ -309,10 +309,11 @@ async function stopRecording() {
 
 // ── mixer (M): sound + visual layers, mute / solo, copy settings ──
 const SOUND_INFO = {
-  KICK: 'sine kick on the ridges · irregular', SUB: 'sub pressure under the scan', PULSE: 'gated sub pulses (intensify)',
-  HUM: 'machine hum of the map', RESONANCE: 'valleys ring: slow low sines', CLICK: 'hard edges crossed by the scan',
-  NOISE: 'rough texture: gated bursts', DATA: 'image rows as data / dial pulses', SCANNER: 'the read head: dry micro-ticks',
-  GLITCH: 'hardest edges: digital glitch', TONE: 'one low interval (consumption)', CRASH: 'the end: the image is consumed',
+  HEART: 'the epicenter beats: sub lub-dub', PEAKS: 'summits pulse in their own periods', NERVES: 'impulses arrive at nodes: clicks',
+  INTERFERENCE: 'two waves meet: accent', MEMORY: 'the scan, re-sequenced', EROSION: 'light reaches a valley: ticks',
+  KICK: 'heart meets a peak · collapses', SUB: 'sub pressure (reading, decay)', HUM: 'faint machine hum',
+  RESONANCE: 'valleys ring: slow low sines', SCANNER: 'the read head: dry micro-ticks', CLICK: 'hard edges under the scan',
+  NOISE: 'overload: gated noise bursts', GLITCH: 'hardest edges · collapses', TONE: 'one low interval (decay)', CRASH: 'the end: the image is consumed',
 };
 const VISUAL_INFO = {
   TERRAIN: 'the whole terrain mesh', CONTOURS: 'contour lines (3 densities)', WIREFRAME: 'wireframe state', RIDGES: 'ridge hatching on edges',
@@ -379,16 +380,14 @@ function frame(now) {
     const C = app.composer;
     pos = audio.position();
     const lb = pos.loopBarF, sec = pos.section;
-    const scan = C.scanAt(lb);
-    scan.dir = scan.sweep % 2 === 0 ? 1 : -1;
+    const scan = C.scanAt(lb); scan.dir = 1;
     app.form = Math.max(app.form, smoothstep(0, 2.5, pos.barF));                  // the photograph folds into a terrain
-    const cons = C.sections[3], int = C.sections[2];
-    const decay = smoothstep(int.start + int.bars * 0.6, int.start + int.bars, lb) * 0.15 + smoothstep(cons.start, C.endBar, lb) * 0.85;
+    const decay = smoothstep(C.L.start + C.L.bars * 0.8, C.Dc.start, lb) * 0.12 + smoothstep(C.Dc.start, C.endBar, lb) * 0.88;
     const fade = 1 - smoothstep(C.endBar + 0.05, C.endBar + 0.6, lb);
-    app.energy += (sec.energy - app.energy) * Math.min(1, dt * 0.6);
+    app.energy += (C.energyAt(lb) - app.energy) * Math.min(1, dt * 0.6);
     const lv = audio.levels();
-    low = clamp(((lv.SUB || 0) + (lv.PULSE || 0) * 0.8 + (lv.HUM || 0) * 1.5 + (lv.KICK || 0) * 0.4) * 5);
-    st = { section: sec.name, energy: app.energy, scan, decay, form: app.form, fade };
+    low = clamp(((lv.SUB || 0) + (lv.HEART || 0) * 1.3 + (lv.HUM || 0) * 1.5 + (lv.KICK || 0) * 0.4 + (lv.PEAKS || 0) * 0.3) * 5);
+    st = { section: sec.name, energy: app.energy, scan, decay, form: app.form, fade, lb, g: sec.name === 'LIFE' ? (lb - C.L.start) / C.L.bars : sec.name === 'DECAY' || sec.name === 'END' ? 1 : 0 };
     for (const ev of audio.drain(audio.heardTime())) { visuals.trigger(ev); note(ev, now); }
     // one shot: after the crash the system asks for a new image
     if (!audio.loopMode && lb >= C.endBar + 1.6 && pos.loop === 0) { endPiece(); return; }
@@ -399,7 +398,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-/** Data / glitch / transmission sounds leave a short-lived technical note on the map. */
+/** Some events leave a short-lived technical note on the map, at their place. */
 function note(ev, now) {
   if (ev.x === undefined) return;
   const hex = () => Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
@@ -407,7 +406,11 @@ function note(ev, now) {
   if (ev.type === 'glitch') text = `ERR ${hex()}`;
   else if (ev.type === 'data') text = ev.kind === 'dial' ? `DIAL ${ev.count}` : `DATA ${hex()}`;
   else if (ev.type === 'res') text = `RES ${ev.freq.toFixed(1)} Hz`;
-  else if (ev.type === 'sub' && ev.focus) text = `FOCUS ${ev.freq.toFixed(1)} Hz`;
+  else if (ev.type === 'awake') text = `P${ev.id} AWAKE · ${ev.period}/16`;
+  else if (ev.type === 'interf') text = `INT ${(ev.ang * 180 / Math.PI).toFixed(0)}°`;
+  else if (ev.type === 'memory' && ev.first) text = `MEM R${String(ev.rec).padStart(2, '0')}`;
+  else if (ev.type === 'superpose') text = '|ψ⟩ = Σ 3 states';
+  else if (ev.type === 'kick' && ev.collapse) text = 'COLLAPSE';
   if (text) app.notes.push({ x: ev.x, y: ev.y, text, t: now, life: ev.type === 'res' ? 1600 : 650 });
 }
 
@@ -482,7 +485,7 @@ function drawOverlay(now, pos, st) {
   }
 }
 
-// ── deep links: #demo=ii  #section=INTENSIFY&at=4  #bar=40  #loop=1 ─
+// ── deep links: #demo=ii  #section=LIFE&at=20  #bar=40  #loop=1 ─
 if (hashParams.get('demo')) {
   const d = DEMOS.find((x) => x.id === hashParams.get('demo'));
   if (d) setTimeout(() => begin(d.make(), d.name, demoBytes(d)), 300);

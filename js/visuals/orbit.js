@@ -53,6 +53,6 @@ export class Orbit extends Layer {
     this.group.add(l);
   }
   onEvent(ev, now) {
-    if ((ev.type === 'sub' && ev.focus) || ev.type === 'tone') this.mat.uniforms.uPulseT0.value = now;
+    if ((ev.type === 'heart' && ev.lub) || ev.type === 'tone') this.mat.uniforms.uPulseT0.value = now;
   }
 }
