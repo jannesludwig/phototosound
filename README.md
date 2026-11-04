@@ -1,155 +1,199 @@
 # Photo to Sound
 
-A photograph crosses into another dimension and becomes a cryptic, rhythmic
-audiovisual piece: precise, digital, cold, and something you can nod to.
+A photograph crosses into another dimension and becomes a 3-minute
+audiovisual performance: precise, digital, cold and beautiful, with a beat you
+can nod to. References are Alva Noto's *Unieqav*, Ryoji Ikeda, Raster-Noton,
+Kurokawa and Quayola.
 
-The app reads what is in the image and decides how it dissolves and how it
-sounds, so every photo turns into a different piece. The same photo always
-produces the same piece: a hash of the file is the seed for every random choice.
+**The image is the score.** The app extracts the photo's actual forms: its
+strokes, contours, straight lines, corners, points of light, colour regions,
+salient regions and empty areas. Each one becomes **both a visual element and
+a sound**, scheduled on one timeline:
 
-Everything runs in the browser. Your photo is never uploaded. Only the
-libraries (three.js, MediaPipe) and the face-detection model weights are
-downloaded from public CDNs.
+- a stroke draws itself with a soft tick, then detaches with a filtered noise
+  tick
+- a point of light flashes with a click
+- a colour region slides apart with a noise burst
+- a straight line extended across the screen flashes with a rim
+
+Every photo has different structures, so every photo becomes a different
+piece. A hash of the file seeds every choice, so the same photo always gives
+the same piece. Each loop pass mutates, so the piece never repeats itself.
+
+Everything runs locally in the browser and the photo is never uploaded. Only
+the libraries and model weights are downloaded: three.js and MediaPipe Tasks
+Vision from jsDelivr, and the model files from Google's model storage.
 
 ## Run
 
-This is a static site with no build step. Serve the folder and open `index.html`:
+The site is static, with no build step and `index.html` at the root (ready for
+GitHub Pages).
 
 ```bash
 python3 -m http.server 8000
 ```
 
-To deploy on GitHub Pages, publish the repository root (`index.html` is at the
-top level).
+**Deep links for testing:**
 
-Deep links for testing: `#demo=ii` loads demo ii, `#world=FLOW` forces a
-primary world, and `#bar=56` starts at a given bar (here, the breakdown).
+- `#demo=ii` loads demo ii.
+- `#section=PEAK&at=4` starts 4 bars into the peak.
+- `#bar=40` starts at bar 40.
+- `#layer=fragments` forces the lead layer.
 
-## The experience
+`tools/report.html` runs the full analysis and score on the built-in images or
+on your own photos and prints a comparison table (see `docs/TEST.md`).
 
-1. **Landing.** A black screen, one line of monospace text, an almost
-   invisible drop zone, and `demo i ii iii`.
-2. **Reading.** The photo appears sharp. A scan line passes over it while
-   the readouts list what the analysis found, ending with the world, for
-   example `world: DISSOLUTION × RASTER`.
-3. **Crossing over.** Over the first bars the image turns into its world,
-   and the visuals are driven by the music.
-4. **Observation.** Moving the mouse or touching the screen collapses the
-   area around the pointer back into the original photo, like a quantum
-   state that collapses when it is observed. Let go and it dissolves again.
-   Once per loop, in the silent bar at the end of the breakdown, the whole
-   image re-coheres on its own.
+## The performance
 
-Controls appear on hover or tap: pause, new, volume, and `rec`, which exports
-a WebM of the picture with its sound. To switch worlds by hand, click the
-world name in the bottom-right corner. Space toggles pause.
+| | Section | ≈ time | Sound | Image |
+|---|---|---|---|---|
+| 1 | **Reading** | 0:00–0:20 | sub drone, single clicks and ticks | the photo dims to a ghost; its strokes, face contours and contour levels draw themselves one by one; points light up |
+| 2 | **Decomposition** | –0:55 | the pulse enters, first bass phrases | the lead layer takes the image apart; strokes detach and drift on beats |
+| 3 | **Build** | –1:40 | hats, rims, snare, bass, textures; filters open; fills every 8 bars | the second and third layers enter; tension rises steadily |
+| 4 | **Peak** | –2:10 | full track, polyrhythmic clicks, stutters | the **signature moment**, then a white flash into black |
+| 5 | **Afterglow** | –2:40 | low pads from the photo's colours, sub notes, a soft heartbeat | elements fall away |
+| 6 | **Memory** | –3:00 | one tone, then silence | a faint ghost of the photo |
 
-## Image analysis (`js/analysis.js`, `js/face.js`)
+- **Section lengths vary per photo.** For example, empty dark areas give a
+  longer Reading and Memory, dense images a longer Build, and faces a longer
+  Afterglow.
+- **A tension curve drives both engines.** In sound it sets filter cutoff,
+  density and FM index; in image it sets drift, brightness, glitch rate and
+  terrain tilt.
+- **The signature moment** is chosen from the image:
+  - RECONSTRUCT: the photo rebuilds itself from its fragments.
+  - GRID: everything snaps to a grid.
+  - NETWORK: every point is linked.
+  - SWEEP: a full pixel-sort sweep.
+  - STRATA: contour terraces separate in depth.
 
-The analysis runs on a copy of the photo at most 192 px wide. Light points are
-detected on a 512 px copy, and faces on a 640 px copy.
+**The hand.**
 
-| Feature | Method |
+- The cursor or finger is a force field. Lines bend around it, cells flip,
+  points are knocked out of orbit, fragments are pushed aside, and everything
+  springs back with inertia.
+- The effect scales with speed.
+- Sound reacts: a granular scrub of the image row under the cursor, a filter
+  that opens with speed, and clicks when crossing strong edges.
+- A still press (hold) reveals the original photo under the finger.
+
+**UI.** Corner readouts show the signature, BPM, root, mode, section, tension,
+bar and pass, the vocabulary and the mood. Controls appear on hover or tap:
+pause, new, volume and rec (WebM of image and sound). Click the vocabulary
+(bottom right) to choose which layer leads. Space toggles pause.
+
+## Analysis → structures
+
+All analysis is at most 256 px (light points at 512 px). See `js/analysis.js`
+and `js/structures.js`.
+
+| | Method |
 |---|---|
-| Face presence, size, position | MediaPipe Tasks Vision face detector (BlazeFace), run locally in WASM |
-| Straight-line strength, orientation | Hough lines scored by *coverage*: the share of each line's length inside the frame that is covered by matching edges, minus the chance level at that angle. Real lines score close to 1, and dense texture stays near 0. |
-| Edge orientation histogram | Sobel gradients in 18 bins. Horizontal and vertical dominance. |
-| Light points | Small, compact, bright blobs on a darker background (stars, city lights, reflections on water): count and spread |
-| Radial symmetry | Edge pixels vote for circle centres along their gradient. Peak against mean. |
-| Smoothness | Tonal range present, but little high-frequency (Laplacian) detail |
-| Flow / motion | Structure tensor: the share of the image covered by strongly oriented texture, damped for flat graphics |
-| Flatness, colour count | Share of perfectly flat (non-dark) pixels, number of 4-bit colour bins |
-| Tone | Brightness, contrast (σ), chroma-weighted saturation, circular mean hue, a 5-colour k-means palette |
-| Signature | A 53-bit hash of the file bytes. It seeds every random choice. |
+| strokes | Sobel → non-max suppression → hysteresis; 8-connected chains → RDP polylines |
+| contours | marching squares on smoothed luminance at quantile levels |
+| straight lines | Hough with orientation-checked runs, so they are real segments with endpoints |
+| corners | Shi–Tomasi with spacing |
+| light points | compact bright blobs on dark ground |
+| colour regions | k-means in an opponent colour space; connected components |
+| fragments | Bowyer–Watson Delaunay over corners and stroke points, coloured by the pixels underneath |
+| salient regions | centre–surround in L, a, b |
+| voids | dark, flat cells |
+| symmetry, colourfulness, temperature | mirror correlation; Hasler–Süsstrunk; chroma-weighted R − B |
+| face + landmarks | MediaPipe FaceDetector, then FaceLandmarker contours (only when a face exists) |
+| content | MediaPipe ImageClassifier (EfficientNet-Lite0 int8, ImageNet) → portrait, city, nature, water, night, fabric, abstract |
+| global features | brightness, contrast, saturation, hue, edge density, line strength (Hough coverage), smoothness, structure-tensor flow, flatness, colour count, palette |
+| pixel sorting | rows and columns sorted inside edge/brightness intervals (ASDF-style) |
 
-## Image → world (`js/worlds.js`)
+**Mood** is a subtle vector: warmth, energy, darkness, openness and intimacy.
+The nearest named prototype is one of warm / intimate, cold / clinical,
+dark / mysterious, vast / calm, tense / dense, or vivid / restless.
 
-Each world gets a weight. The highest weight is the **primary** world and the
-second highest is the **accent**. The accent stays a faint trace and takes
-over during the breakdown.
+## Image → sound
 
-| World | Triggered by | What happens |
-|---|---|---|
-| **DISSOLUTION** | face (score × size), warm organic subject, centred detail | The image becomes luminous pixel particles in their source colours. They lift off in a seeded order, light first. The face holds together longest. |
-| **RASTER** | straight-line coverage, horizontal/vertical dominance | Scanlines along the dominant orientation shift in 1/16 steps on the beat, stretch their edge pixels beyond the frame, pixelate, and turn into barcode data stripes. |
-| **ORBIT** | many light points on dark ground, radial symmetry | Concentric rings and rotating arcs around the brightest points, and particles on Keplerian orbits. Each kick sends out a ripple. |
-| **TOPOGRAPHY** | smooth gradients, few edges | Luminance becomes a height map: contour lines on a wireframe terrain that tilts out of the picture plane and breathes. Kicks send waves across it. |
-| **FLOW** | large areas of coherent, streaky texture | Thin streaks travel along the structure-tensor field and take the colours they pass over. They surge on each beat. |
-| **MATRIX** | flat areas, few colours, contrast | Data cells: quantised colour blocks, binary digits (1 = brighter than the image mean), dots. Cells flip on each step, rows reorder on noise bursts, bands stutter, and rows leak out of the frame as bit streams. |
+The voice set is deep minimal techno: three kick characters, sub, a 2-operator
+FM bass, digital rims, the bright glitch clicks, noise snare/clap, hats, low
+pads, crackle, bitcrushed hiss, granular image grains, data stutters, an impact
+and a memory tone.
 
-Per-photo seeded parameters (density, speed, line thickness, ring spacing,
-contour count, grid size, accent colour) make two photos in the same world
-look different.
-
-## Image → sound (`js/audio/composer.js`, `js/audio/engine.js`)
+There are **no high sine tones**. Tonal content stays below about 1.5 kHz, and
+highs come only from transients and noise.
 
 | Image | Sound |
 |---|---|
-| Brightness | Tempo (112–128 BPM) and root frequency (≈37–58 Hz, in semitones) |
-| Contrast | Weight and decay of the sub kick |
-| Edge density | Number of clicks and micro-glitches |
-| Saturation | Number and colour of band-passed noise bursts |
-| Hue | The harmonic set used for the high sine tones |
-| Grid columns | The 16 sequencer steps. Euclidean patterns are built from column data and rotated by the brightest or edgiest column. |
-| Grid rows | Pitch of the sine blips (higher in the image = higher pitch) |
-| x position of source pixels | Stereo pan |
-| Image rows | Played as tiny waveforms in the data stutters |
+| mood | tempo range (106–128) and mode (Dorian, quartal, Phrygian, Lydian, Aeolian, Mixolydian) |
+| dominant hue | root (≈ 37–69 Hz) |
+| colour regions (by area, hue) | the pad chords (never sweet: open voicings) |
+| strokes | bass phrases: the stroke's vertices are the notes, its height is the pitch |
+| straight lines | rims: endpoints → steps, angle → pitch; lines also mean straight 4/4 |
+| corners (x-histogram) | which 16ths carry hats |
+| light points / corners | clicks in a 3-, 5- or 7-step polyrhythm, each flashing its point |
+| salient regions | data stutters (the image row played as a waveform) |
+| contrast | weight of the kick |
+| darkness | deep, long kick; hiss |
+| flow / blur | shuffle and ghost kicks |
+| face, intimacy | sparse, soft kick; more pad; longer afterglow |
+| voids | silence: mutes and fewer layers |
+| detail, warmth | crackle |
+| x position of any source | stereo pan |
 
-The image is a 64 × 32 grid. In each bar the sequencer reads a band of 8 rows
-across 16 columns spread over the full width. The band scans from top to
-bottom over one loop, so the pattern keeps changing as the piece reads down
-the photo.
+Each voice has an *amount* computed from the photo. A voice below the threshold
+does not exist for that photo, which is why instrument sets differ.
 
-**The world shapes the rhythm.**
+**Mix.**
 
-- RASTER: a strict four-on-the-floor grid
-- ORBIT: pulsing half-time with long sines and a short, dark ping-pong echo
-- DISSOLUTION: sparse and fragile
-- MATRIX: glitchy, with dropouts, stutters and bitcrush
-- TOPOGRAPHY: slow, with a long kick and deep sub movement
-- FLOW: rolling and swung, with ghost kicks
+- **Ducking:** pads, textures and bass are sidechained by gain automation
+  scheduled at each kick.
+- **Low end:** the bass bus is mono and saturated, and the reverb is a dark
+  generated impulse response on pads and tone only.
+- **Master:** high-pass, light tanh saturation, then a limiter.
 
-**Structure.** One loop is 88 bars, about 3 minutes:
-`INTRO 16 → BEAT 16 → FULL 24 → BREAKDOWN 16 → RETURN 16`, then it loops.
-The last breakdown bar is silence while the image re-coheres. The kick
-returns on the downbeat and the image dissolves again.
+**Timing.**
 
-**Palette.** Everything is synthesised with no samples: a deep clean sub kick,
-sharp digital clicks, pure high sine tones, band-passed noise bursts, data
-stutters and an occasional 4-bit crush. Silence is part of the composition.
-There is no reverb wash. A master limiter catches the peaks.
+- A worker clock schedules 150 ms ahead. Step times come from integer step
+  indices, so nothing drifts.
+- Every scheduled sound also goes to a queue that the visuals read against the
+  same audio clock.
 
-**Timing.** A worker-driven clock schedules 150 ms ahead. Step times are
-computed from the integer step index, so nothing drifts. Every scheduled sound
-also goes onto a queue that the visuals read against the audio clock (with the
-output latency compensated), so picture and sound stay locked.
+## Image → visual vocabulary
 
-**Visual reactions.** The kick pulses the field, clicks make sharp sparks at
-their source pixel, sines make a fine shimmer, and noise makes interference
-and scatter.
+There are no fixed worlds. The score picks a weighted vocabulary of layers for
+each photo (A, B, C enter in Decomposition and at ⅓ and ⅔ of the Build), plus
+contours and a constellation in the Reading.
+
+| Layer | Built from | Weighted by |
+|---|---|---|
+| contours | strokes, face contours, iso-contours | always |
+| constellation | light points, corners, landmarks, Delaunay links | corners, points, night |
+| topography | luminance height field | smoothness, openness, nature/water |
+| fragments | Delaunay mosaic grouped by colour region | colour regions, colourfulness, faces |
+| sort | pixel-sorted bands | flow, detail, fabric |
+| barcode | straight lines extended to the screen edge | line strength, city |
+| particles | pixel grid (the face holds longest) | face, organic |
+| flow | structure-tensor streamlines | flow, fabric |
+| matrix | quantised data cells | graphic, abstract |
+| orbit | rings and orbits around light points | points on dark ground, radial forms |
+| glitch | salient regions | saliency |
 
 ## Files
 
 ```
-index.html            page + import map
-css/style.css         gallery black, hairlines, monospace
-js/main.js            flow: landing → reading → playing, UI, 2D overlay
-js/analysis.js        feature vector, grid, maps, signature
-js/face.js            MediaPipe face detection (lazy, optional)
-js/worlds.js          features → world weights, sound styles, seeded params
-js/demo.js            three procedural test images
-js/rng.js             hashing, seeded PRNG, Euclidean rhythms
-js/recorder.js        WebM export (canvas + master bus)
-js/audio/composer.js  deterministic score from the image grid
-js/audio/engine.js    voices, lookahead scheduler, limiter
-js/visuals/engine.js  three.js renderer, photo plane, world blending
-js/visuals/*.js       the six worlds + shared GLSL
+index.html               page + import map
+css/style.css            gallery black, hairlines, monospace
+js/main.js               flow, UI, overlay, the hand
+js/analysis.js           global features, palette, signature
+js/structures.js         strokes, contours, lines, corners, regions, fragments, saliency, voids, sort
+js/face.js               MediaPipe face detection + landmarks
+js/classify.js           MediaPipe image classifier → content
+js/mood.js               mood vector + prototype
+js/score.js              the shared timeline: plan, sections, tension, events
+js/audio/engine.js       voices, mix, scheduler, cursor sound
+js/visuals/engine.js     renderer, layer orchestration, flash, ghost
+js/visuals/field.js      cursor force field (spring grid)
+js/visuals/*.js          the layers + shared GLSL
+js/demo.js               three demo images (i nocturne, ii facade, iii dune)
+js/testimages.js         seven procedural test photographs
+tools/report.html        analysis/score comparison table
+docs/RESEARCH.md         research notes
+docs/DESIGN.md           design decisions
+docs/TEST.md             test report: features, moods, instruments, vocabularies, timing
 ```
-
-The demo images are procedural: **i** *nocturne* (stars, a halo, light on
-water) → ORBIT, **ii** *facade* (a grid of windows) → RASTER, **iii** *dune*
-(soft layered gradients) → TOPOGRAPHY.
-
-Mobile: particle counts and resolution are reduced, and rendering resolution
-drops automatically when frames are slow. Audio unlocks on the first tap, and
-on iOS the audio session is set to playback.

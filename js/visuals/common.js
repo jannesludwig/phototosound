@@ -103,13 +103,13 @@ export function makeSharedUniforms() {
  * ShaderMaterial wired to the shared uniforms plus a private uMix and extras.
  * Blending is additive by default (light on black).
  */
-export function makeMaterial(shared, { vertex, fragment, uniforms = {}, blending = THREE.AdditiveBlending, extensions }) {
+export function makeMaterial(shared, { vertex, fragment, uniforms = {}, blending = THREE.AdditiveBlending, extensions, side = THREE.DoubleSide }) {
   const u = { ...shared, uMix: { value: 0 }, ...uniforms };
   const mat = new THREE.ShaderMaterial({
     uniforms: u,
     vertexShader: GLSL_COMMON + vertex,
     fragmentShader: GLSL_COMMON + fragment,
-    transparent: true, depthTest: false, depthWrite: false, blending,
+    transparent: true, depthTest: false, depthWrite: false, blending, side,   // winding flips with the image's y axis
   });
   if (extensions) mat.extensions = extensions;
   return mat;

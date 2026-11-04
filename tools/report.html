@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analysis Report</title>
+  <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+  <style>
+    :root { --fg: #e8eef2; --dim: rgba(232, 238, 242, 0.45); --line: rgba(232, 238, 242, 0.12); }
+    body { background: #000; color: var(--fg); font: 11px/1.6 ui-monospace, Menlo, Consolas, monospace; margin: 24px 16px; }
+    h1 { font-size: 12px; font-weight: normal; letter-spacing: 0.08em; }
+    p { color: var(--dim); max-width: 70ch; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; margin-top: 16px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 4px 10px 4px 0; text-align: left; vertical-align: top; white-space: nowrap; }
+    th { color: var(--dim); font-weight: normal; }
+    input, button { font: inherit; color: var(--fg); background: none; border: 1px solid var(--line); padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <h1>photo → sound · analysis report</h1>
+  <p>Runs the real pipeline in your browser (structures, face, content, mood, score) on the demo and procedural test images, plus any photos you add. Nothing is uploaded. Serve the repository root and open <code>/tools/report.html</code>.</p>
+  <input id="files" type="file" accept="image/jpeg,image/png" multiple> <button id="run">run built-in images</button>
+  <div class="scroll"><table id="t"><thead><tr>
+    <th>image</th><th>strokes</th><th>lines</th><th>corners</th><th>lights</th><th>regions</th><th>void</th><th>mood</th><th>content</th>
+    <th>bpm</th><th>mode</th><th>kick</th><th>instruments</th><th>vocabulary 1</th><th>vocabulary 2</th><th>signature</th><th>sections</th>
+  </tr></thead><tbody></tbody></table></div>
+  <script type="module">
+    import { analyzeImage, rasterize } from '../js/analysis.js';
+    import { extractStructures } from '../js/structures.js';
+    import { detectFace, faceLandmarks } from '../js/face.js';
+    import { classifyContent } from '../js/classify.js';
+    import { deriveMood } from '../js/mood.js';
+    import { planPiece } from '../js/score.js';
+    import { DEMOS } from '../js/demo.js';
+    import { TEST_IMAGES } from '../js/testimages.js';
+
+    const tbody = document.querySelector('#t tbody');
+    async function report(name, src, bytes) {
+      const c = rasterize(src, 2048), a = analyzeImage(c, bytes), st = extractStructures(c, a.seed);
+      const fc = rasterize(src, 640), face = await detectFace(fc); Object.assign(a.features, face);
+      const lm = face.face ? await faceLandmarks(fc) : null;
+      const cls = await classifyContent(rasterize(src, 320));
+      const mood = deriveMood(a.features, st, cls.content), P = planPiece(a, st, mood, cls.content);
+      const p0 = P.pass(0), p1 = P.pass(1);
+      const row = [name, st.strokes.length + (lm ? ` +${lm.strokes.length} face` : ''), st.segments.length, st.corners.length, a.points.length, st.regions.distinct,
+        Math.round(st.voids.fraction * 100) + '%', mood.name, cls.labels[0] ? `${cls.labels[0].name} ${cls.labels[0].score.toFixed(2)}` : '–',
+        P.bpm, P.mode, `${P.kickStyle}/${P.kickChar}`, Object.keys(P.has).filter((k) => P.has[k]).join(' '),
+        p0.vocab.join(' › '), p1.vocab.join(' › '), `${p0.signature} / ${p1.signature}`, p0.sections.map((s) => s.bars).join('-')];
+      const tr = document.createElement('tr');
+      for (const v of row) { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); }
+      tbody.appendChild(tr);
+    }
+    document.getElementById('run').onclick = async () => {
+      for (const d of [...DEMOS, ...TEST_IMAGES]) await report(d.name, d.make(), new TextEncoder().encode('photo-to-sound/demo/' + d.name));
+    };
+    document.getElementById('files').onchange = async (e) => {
+      for (const f of e.target.files) {
+        const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
+        await report(f.name, img, new Uint8Array(await f.arrayBuffer()));
+      }
+    };
+  </script>
+</body>
+</html>
