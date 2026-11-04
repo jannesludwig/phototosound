@@ -483,7 +483,7 @@ function drawOverlay(now, pos, st) {
   }
 }
 
-// ── deep links: #demo=ii  #section=PEAK&at=4  #bar=40  #loop=1 ─
+// ── deep links: #demo=ii  #section=INTENSIFY&at=4  #bar=40  #loop=1 ─
 if (hashParams.get('demo')) {
   const d = DEMOS.find((x) => x.id === hashParams.get('demo'));
   if (d) setTimeout(() => begin(d.make(), d.name, demoBytes(d)), 300);

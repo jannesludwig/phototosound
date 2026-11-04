@@ -1,19 +1,21 @@
 # Photo to Sound
 
-A photograph crosses into another dimension and becomes a 3-minute
-audiovisual piece: raw, hypnotic, dark and minimal, built from the most basic
-materials. References are Alva Noto (*Unieqav*, "Uni Mia"), Ryoji Ikeda and
-Raster-Noton.
+A photograph becomes a **sound map**: a tilted terrain of thin lines on
+black, with a scan line that crosses it and sonifies what lies beneath. Every
+sound lights up the place on the map that made it. The image is consumed over
+a slow, experimental piece of about 3 to 3.5 minutes. The piece ends with
+one white flash, the crash, then asks for a new image.
 
-The app reads what is in the image and chooses how it dissolves and how it
-sounds. A hash of the file seeds every choice, so the same photo always
-produces the same piece. Everything runs in the browser and the photo is never
-uploaded. Only three.js, MediaPipe and the face model are downloaded from
-CDNs.
+References are Alva Noto, Ryoji Ikeda and Raster-Noton. The look is
+technical and organic, like an alien organism made of technology.
 
-Round 3 returned to the first version and reduced it. See `docs/ROUND3.md`
-(what was removed, restored and kept, and the layer names) and
-`docs/V1_VS_V2.md`.
+A hash of the file seeds every choice, so the same photo always produces the
+same piece. Everything runs in the browser and the photo is never uploaded.
+Only three.js, MediaPipe and the face model are downloaded from CDNs.
+
+**Round 4** replaced the six worlds with this single visual language. See
+`docs/ROUND4.md` for every sound and visual layer, the arc, and the tests.
+Earlier rounds are described in `docs/ROUND3.md` and `docs/V1_VS_V2.md`.
 
 ## Run
 
@@ -26,113 +28,102 @@ python3 -m http.server 8000
 
 **Deep links for testing:**
 
-- `#demo=ii` loads demo ii.
-- `#world=FLOW` forces the world.
-- `#section=PEAK&at=4` or `#bar=40` jumps into the piece.
+| Link | What it does |
+|---|---|
+| `#demo=ii` | loads a demo image |
+| `#section=INTENSIFY&at=4` | jumps to bar 4 of a section |
+| `#bar=40` | jumps to a bar |
+| `#loop=1` | starts in loop mode |
 
 ## Experience
 
 1. **Landing.** A black screen, one line, a near-invisible drop zone, and
    `demo i ii iii`.
-2. **Reading.** The photo appears sharp. A scan line passes while small
-   readouts name what the analysis finds, ending with the world.
-3. **The piece**, about 3 minutes, then it loops:
+2. **Reading.** The photo appears and is analysed. Small readouts name the
+   focal point, the terrain and the sound map.
+3. **The piece** runs once by default:
 
 | Section | Sound | Image |
 |---|---|---|
-| INTRO | sub and sparse clicks | the photo's world forms |
-| BUILD | the kick arrives alone, then repeats insistently; clicks grow | hypnotic, one world |
-| PEAK | at most 5 layers; glitch accents; a storm | dense; white glitch flashes |
-| *collapse* | one huge glitch, then a silent bar | white flash; the photograph coheres for one bar |
-| FALL | a heartbeat, one very low tone interval, thinning clicks, the sub gliding down | the accent world appears softly |
-| SILENCE | a last breath, then nothing | black |
+| MAPPING | no beat: sub, sparse clicks, the scanned columns transmitted as data | the photo folds into a terrain; the first sweep maps it |
+| LISTENING | slow: hum, valley resonances, rare kicks on ridges | contours; the orbit breathes at the focal point |
+| INTENSIFY | denser: irregular kicks, sub pulses, glitches; phrases without a beat | fine contours, wire flashes, local flares, rare slicing |
+| CONSUMPTION | the beat leaves, one low tone, the sub glides down | lines break, the border crumbles, colour drains |
+| END | the crash, then nothing | the only full-screen white flash |
+
+After the crash the landing returns and asks for a new image. The **loop**
+toggle at the bottom plays the piece again instead.
 
 **The hand.**
 
-- Moving the cursor or finger cuts through the piece as a force field. Things
-  bend, flip and get knocked aside, then spring back.
-- Crossing a strong edge of the photo makes a click.
+- The slider on the right edge rotates the map. Click-dragging on the map
+  rotates it too.
+- Moving the cursor bends the terrain as a force field, which springs back.
+- Crossing a strong edge makes a click.
 - A still press reveals the original photo under the finger.
 
-**Controls** appear on hover or tap: pause, new, volume, and rec (WebM). Click
-the world name (bottom right) to switch worlds. **M opens the sound mixer.**
+**Controls** appear on hover or tap: pause, new, volume, rec (WebM) and loop.
 
-## Image → world (the visual hand)
+**M opens the mixer:** every sound and visual layer, with mute, solo, live
+meters and a **copy settings** button.
 
-Each photo gets **one** world from its features:
+## Image → map → sound
 
-| World | Chosen by | What it does |
+| Image | Map | Sound when the scan line crosses it |
 |---|---|---|
-| **DISSOLUTION** | faces, portraits, organic subjects | luminous pixel particles in the photo's colours; the face holds longest; particles tunnel on sound events and have faint superposed ghosts |
-| **RASTER** | straight lines, architecture, horizons | scanlines and barcode stripes that shift on the beat and stretch beyond the frame |
-| **ORBIT** | stars, lights, water, circular forms | rings around the brightest points; each kick sends a ripple; particles jump between orbits |
-| **TOPOGRAPHY** | smooth gradients, landscapes, sky | brightness as a height map: contour lines on a breathing terrain |
-| **FLOW** | motion, blur, fabric | streaks along the image's structure-tensor field, teleporting on glitches |
-| **MATRIX** | flat, graphic, abstract | data cells, binary digits, flipping and reordering cells |
+| hard edges | ridges | CLICK; the hardest give a GLITCH |
+| bright, high ground | high ridges | KICK (rare and irregular, never 4/4) |
+| rough texture | rough ground | NOISE bursts; particles break off the border |
+| dark, flat areas | valleys | space, RESONANCE |
+| eye, light or most salient point | the focal summit | a SUB swell; the orbit rings breathe |
+| each column | the scanned column | TRANSMISSION (rows as bits), DATA |
 
-On top of the world, the **quanta** are the photo's own contours (edge strokes,
-iso-lines, straight lines). They never stay on screen: they appear for a few
-frames on sound events as fragments, displaced (tunneled) copies and
-superposed ghosts, flickering by probability. At the collapse they all snap
-in at once.
+**Per-photo parameters:**
 
-**Every GLITCH sound is one white flash:** full white on accents, Ikeda-style
-white bands otherwise. Images use black, white, one cold accent, and their own
-colours sparingly.
-
-## Image → sound
-
-There are seven layers, with at most five sounding at once. Each photo uses a
-small, distinct set, and press **M** to see and solo them.
-
-| Layer | Sound |
+| Image feature | Sets |
 |---|---|
-| KICK | sine kick with a fast pitch drop + an impulse transient |
-| SUB | clean sub sine: slow drone, or gated pulses between the kicks |
-| CLICK | the v1 clicks (impulse, noise tick, 6.2 kHz ring, 3.1 kHz square) |
-| NOISE | short, precisely gated band-passed noise bursts *(only some photos)* |
-| DATA | pixel rows played as waveforms, or telephone dial pulses *(only some photos)* |
-| GLITCH | click cluster + crushed data slice + 20 ms noise slab, always with a white flash |
-| TONE | one very low sine interval, once, after the collapse |
+| contrast | relief, kick decay |
+| tonal range | number of contour levels |
+| brightness | tempo (100–114 BPM) and root |
+| edge density | click density, section lengths |
+| graphic or flat images | terraced into plateaus, and keep more wireframe |
 
-**Mappings:**
+**Sound layers:** KICK, SUB, PULSE, HUM, RESONANCE, CLICK, NOISE, DATA,
+TRANSMISSION, GLITCH, TONE, CRASH. There is a soft budget of 6 sounding at
+once.
 
-| Image | Sound |
-|---|---|
-| world | kick pattern (4/4, half-time, 1 + 11), sub mode (drone or pulse), data kind (stutter or dial), swing, click density, silence, glitch rate |
-| brightness | tempo (112–128 BPM) and root (≈ 37–58 Hz) |
-| contrast | kick weight and decay |
-| edge density | click count and micro double-clicks |
-| saturation / edges / graphic | whether the NOISE and DATA layers exist at all |
-| image grid (64 × 32) | the sequencer reads 16 columns across the width and a band of 8 rows that scans top → bottom over the loop; columns → steps (Euclidean), x → pan |
-
-**Repetition.** Patterns are fixed per 4-bar phrase, and each bar changes at
-most one detail. Silence is part of the composition.
+**Visual layers:** TERRAIN, CONTOURS, WIREFRAME, RIDGES, SCAN, FLARES,
+DEFORM, DECAY, EDGE FLASH, ORBIT, CRUMBLE, SLICING, ANNOTATIONS, CRASH,
+HAND.
 
 **Timing.**
 
-- A worker clock schedules 150 ms ahead. Step times come from integer step
-  indices, so nothing drifts.
-- Every scheduled sound also goes to a queue that the visuals read against the
-  same audio clock (one event → one visual action).
+- A worker clock schedules 150 ms ahead from integer step indices, so nothing
+  drifts.
+- Every scheduled sound also goes to a queue that the visuals read against
+  the same audio clock (one event → one place on the map).
 
 ## Files
 
 ```
-index.html              page, import map, always-on upload/drop script
-css/style.css           gallery black, hairlines, monospace; mixer
-js/main.js              flow, UI, overlay, the hand, mixer
+index.html              page, import map, always-on upload/drop script (Safari fix)
+css/style.css           gallery black, hairlines, monospace; yaw slider; mixer
+js/main.js              flow, UI, annotations overlay, the hand, rotation, mixer
 js/analysis.js          features, grid, palette, signature
 js/structures.js        edge strokes, iso-contours, straight segments
-js/face.js              MediaPipe face detection
-js/worlds.js            features → world, sound styles, seeded params
-js/audio/composer.js    the arc, phrase patterns, layer budget
-js/audio/engine.js      voices, per-layer buses, scheduler, limiter
-js/visuals/engine.js    renderer, world mix, white flashes, collapse
-js/visuals/quanta.js    contour flashes (superposition, tunneling, collapse)
+js/face.js              MediaPipe face detection (box + eye keypoints)
+js/map.js               the sound map: height, ridges, texture, focal point, params
+js/audio/composer.js    the arc, the scan, map → events, silence, layer budget
+js/audio/engine.js      voices, per-layer buses, scheduler, limiter, one-shot/loop
+js/visuals/engine.js    renderer, photo → terrain, projection, layer toggles, crash flash
+js/visuals/terrain.js   the terrain: contours, wire, ridges, scan, flares, deform, decay
+js/visuals/edges.js     EDGE FLASH
+js/visuals/orbit.js     ORBIT around the focal point
+js/visuals/crumble.js   CRUMBLE: border particles
+js/visuals/slicing.js   SLICING: rare quantum slices
 js/visuals/field.js     the hand's force field
-js/visuals/*.js         the six worlds + shared GLSL
+js/visuals/common.js    shared GLSL (terrain height + pose), layer base
 js/demo.js              three procedural demo images
 Test_Images/            test photos
-docs/                   ROUND3, V1_VS_V2, TEST, research and round-2 design
+docs/                   ROUND4 (current), ROUND3, V1_VS_V2, TEST (round 3), research
 ```
