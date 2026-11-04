@@ -149,8 +149,9 @@ export class Composer {
       if (sbs % 4 === 0) push(0, 'sub', { freq: root * [1, 9 / 8, 3 / 4, 1][phrase % 4], to: root * [9 / 8, 1, 1, 3 / 4][phrase % 4], dur: 4, vel: 0.2, x: M.focal.x, y: M.focal.y });
       if (sbs % 4 === 2 && pr() < 0.6) push(0, 'hum', { freq: root * 2, dur: 4, vel: 0.03, x: M.focal.x, y: M.focal.y });
     } else {
-      const rot = Math.floor(pr() * 16), keep = 0.35 + 0.45 * prog;
-      for (const s0 of st.subSteps) { const s = (s0 + rot) % 16; if (rng() < keep && !(silentHalf && s >= 8)) push(s, 'pulse', { freq: root * (pr() < 0.2 ? 3 / 4 : 1), dur: 0.7, vel: 0.17, x: cols[s].x, y: cols[s].y }); }
+      // sparse Euclidean fragments (3–5 in 16), re-rotated every phrase: a pattern, never a grid
+      const pat = euclid(Math.min(5, 2 + Math.floor(st.subSteps.length / 2)), STEPS, Math.floor(pr() * 16)), keep = 0.45 + 0.4 * prog;
+      for (let s2 = 0; s2 < STEPS; s2++) if (pat[s2] && rng() < keep && !(silentHalf && s2 >= 8)) push(s2, 'pulse', { freq: root * (pr() < 0.2 ? 3 / 4 : 1), dur: 0.7, vel: 0.17, x: cols[s2].x, y: cols[s2].y });
     }
     // clicks: Euclidean, from the columns of the image, held for a phrase
     const k = Math.round(clamp(st.clickDens * (0.5 + prog * 0.6)) * (3 + 7 * clamp(cols.reduce((s, c) => s + c.e, 0) / STEPS * 2)));
