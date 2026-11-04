@@ -280,18 +280,6 @@ export class AudioEngine {
     o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.05);
   }
 
-  /** SUB (pulse) — a gated sub sine between the kicks: the insistent pressure line. */
-  v_pulse(t, ev, out) {
-    const ctx = this.ctx, o = ctx.createOscillator(), g = ctx.createGain();
-    const dur = ev.dur * this.stepDur;
-    o.type = 'sine'; o.frequency.setValueAtTime(ev.freq, t);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(ev.vel, t + 0.006);
-    g.gain.setValueAtTime(ev.vel, t + dur * 0.7);
-    g.gain.linearRampToValueAtTime(0, t + dur);
-    o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.02);
-  }
-
   /** CLICK — the v1 click palette. */
   v_click(t, ev, out, L) {
     const ctx = this.ctx, s = ctx.createBufferSource(), g = ctx.createGain();
@@ -402,37 +390,6 @@ export class AudioEngine {
     }
   }
 
-  /** PRESSURE — deep sub pressure: two sines a fraction of a hertz apart (a slow beating), long swell,
-   *  optional slow glide. Felt more than heard. */
-  v_pressure(t, ev, out) {
-    const ctx = this.ctx, dur = ev.dur * this.barDur, g = ctx.createGain();
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(ev.vel, t + dur * (ev.attack ?? 0.5));
-    g.gain.setValueAtTime(ev.vel, t + dur * 0.85); g.gain.linearRampToValueAtTime(0, t + dur);
-    g.connect(out);
-    for (const d of [0, ev.beat ?? 0.35]) {
-      const o = ctx.createOscillator(); o.type = 'sine';
-      o.frequency.setValueAtTime(ev.freq + d, t);
-      if (ev.to) o.frequency.exponentialRampToValueAtTime(ev.to + d, t + dur);
-      o.connect(g); o.start(t); o.stop(t + dur + 0.05);
-    }
-  }
-
-  /** FIELD — a data texture: the photo's pixel rows cut into 6–14 ms crushed slivers, fired in a
-   *  precise irregular stream (Ikeda-like), band-limited. Never a bed: it starts and stops hard. */
-  v_field(t, ev, out, L) {
-    const ctx = this.ctx, bp = ctx.createBiquadFilter(), rng = makeRng(Math.floor(t * 997) ^ ev.row);
-    bp.type = 'bandpass'; bp.frequency.value = ev.freq; bp.Q.value = 0.9;
-    bp.connect(this.panner(ev.pan, out));
-    const n = ev.count, span = ev.dur * this.stepDur;
-    for (let k = 0; k < n; k++) {
-      const s = ctx.createBufferSource(), g = ctx.createGain();
-      s.buffer = this.dataBufsCrushed[(ev.row + Math.floor(rng() * 3)) % this.dataBufsCrushed.length];
-      const tk = t + (k / n) * span + rng() * span / n * 0.4, len = 0.006 + rng() * 0.008;
-      g.gain.setValueAtTime(ev.vel * (0.6 + 0.4 * rng()), tk); g.gain.setValueAtTime(0, tk + len);
-      s.connect(g); g.connect(k % 3 === 2 ? this.crush[L] : bp); s.start(tk, rng() * s.buffer.duration * 0.8, len + 0.002);
-    }
-  }
-
   /** CRASH — the end: the image is consumed. Click cluster + crushed data slab + noise + a deep sub drop. */
   v_crash(t, ev, out, L) {
     const ctx = this.ctx;
@@ -460,25 +417,59 @@ export class AudioEngine {
     });
   }
 
-  /** Interaction: a whisper of a low sine under the cursor — brightness → pitch, movement → level. */
-  hover(lum, speed) {
-    if (!this.pieceGain || !this.bus.HAND) return;
-    const ctx = this.ctx, t = ctx.currentTime;
-    if (!this.hoverOsc || this.hoverOut !== this.pieceGain) {
-      if (this.hoverOsc) { try { this.hoverOsc.stop(); } catch (e) { /* */ } }
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine'; o.frequency.value = 60; g.gain.value = 0;
-      o.connect(g); g.connect(this.bus.HAND); o.start();
-      this.hoverOsc = o; this.hoverGain = g; this.hoverOut = this.pieceGain;
-    }
-    const root = this.params ? this.params.root : 40;
-    this.hoverOsc.frequency.setTargetAtTime(root * (1.5 + lum * 2.5), t, 0.08);
-    this.hoverGain.gain.setTargetAtTime(Math.min(0.035, speed * 0.02), t, speed > 0.05 ? 0.05 : 0.4);
+  // ── round 5: the living map ─────────────────────────────────
+  /** HEART — the epicenter beats: a sub sine thump (lub / softer dub) with a quiet 2nd partial, no tone. */
+  v_heart(t, ev, out) {
+    const ctx = this.ctx, f = ev.freq, d = ev.lub ? 0.17 : 0.12, v = ev.vel * 0.85;
+    const g = ctx.createGain(); g.connect(out);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.004); g.gain.setTargetAtTime(0, t + 0.03, d / 3);
+    [[1, 1], [2, 0.22]].forEach(([k, a]) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(f * k * 1.6, t); o.frequency.exponentialRampToValueAtTime(f * k, t + 0.045);
+      og.gain.value = a; o.connect(og); og.connect(g); o.start(t); o.stop(t + d + 0.4);
+    });
+  }
+
+  /** PEAKS — a summit pulses: a short low sine thud (55–170 Hz, fast pitch drop) + an impulse; a knock, not a blip. */
+  v_peak(t, ev, out) {
+    const ctx = this.ctx, o = ctx.createOscillator(), g = ctx.createGain(), p = this.panner((ev.x - 0.5) * 1.2, out);
+    o.type = 'sine'; o.frequency.setValueAtTime(ev.freq * 1.35, t); o.frequency.exponentialRampToValueAtTime(ev.freq, t + 0.025);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(ev.vel, t + 0.002); g.gain.setTargetAtTime(0, t + 0.012, 0.035);
+    o.connect(g); g.connect(p); o.start(t); o.stop(t + 0.3);
+    const s = ctx.createBufferSource(), gs = ctx.createGain(); s.buffer = this.clickBufs[0]; gs.gain.value = ev.vel * 0.18; s.connect(gs); gs.connect(p); s.start(t);
+  }
+
+  /** NERVES — an impulse arrives at a node: a v1 click (edge/ridge) or a 10–30 ms gated noise grain (rough place). */
+  v_nerve(t, ev, out, L) {
+    if (ev.kind === 'tex') { this.v_noise(t, { vel: ev.vel, dur: 0.01 + ev.vel * 0.06, freq: ev.freq, q: 6, pan: ev.pan, x: ev.x }, out); return; }
+    this.v_click(t, ev, out, L);
+  }
+
+  /** INTERFERENCE — two waves meet: a crushed click doublet + a 10 ms band-passed noise slab. */
+  v_interf(t, ev, out, L) {
+    const ctx = this.ctx, p = this.panner(ev.pan, out);
+    [[0, 0], [1, 2]].forEach(([k, buf]) => { const s = ctx.createBufferSource(), g = ctx.createGain(); s.buffer = this.clickBufs[buf]; g.gain.value = ev.vel * (k ? 0.6 : 0.8); s.connect(g); g.connect(k ? this.crush[L] : p); s.start(t + k * 0.0055); });
+    const n = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    n.buffer = this.noiseBuf; bp.type = 'bandpass'; bp.frequency.value = ev.freq; bp.Q.value = 5;
+    g.gain.setValueAtTime(ev.vel * 0.5, t); g.gain.setValueAtTime(0, t + 0.01);
+    n.connect(bp); bp.connect(g); g.connect(p); n.start(t, (ev.x || 0) * 1.5, 0.02);
+  }
+
+  /** MEMORY — what the scan heard, re-sequenced: its clicks, crushed; the first one drags its pixel row along. */
+  v_memory(t, ev, out, L) {
+    this.v_click(t, { vel: ev.vel, variant: ev.variant, pan: ev.pan, crush: true }, out, L);
+    if (ev.first) this.v_data(t + 0.01, { kind: 'stutter', count: 3, rate: 1 / 4, vel: ev.vel * 0.55, row: ev.row, pan: ev.pan, crush: true }, out, L);
+  }
+
+  /** EROSION — light arrives in a valley: 2–4 very fine high-passed noise ticks. */
+  v_erode(t, ev, out) {
+    const ctx = this.ctx, hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3800; hp.connect(this.panner(ev.pan, out));
+    for (let k = 0; k < ev.n; k++) { const s = ctx.createBufferSource(), g = ctx.createGain(); s.buffer = this.clickBufs[1]; g.gain.value = ev.vel * (1 - k * 0.2); s.connect(g); g.connect(hp); s.start(t + k * (0.011 + k * 0.004)); }
   }
 
   /** Interaction: a soft click when the cursor crosses one of the photo's strong edges. */
   edgeClick(x, strength) {
     if (!this.pieceGain) return;
-    this.v_click(this.ctx.currentTime + 0.003, { vel: 0.08 + 0.18 * Math.min(1, strength), pan: x * 1.8 - 0.9, variant: 2 }, this.bus.HAND, 'HAND');
+    this.v_click(this.ctx.currentTime + 0.003, { vel: 0.12 + 0.3 * Math.min(1, strength), pan: x * 1.8 - 0.9, variant: 2 }, this.bus.CLICK, 'CLICK');
   }
 }

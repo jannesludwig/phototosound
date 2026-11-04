@@ -57,8 +57,7 @@ const FRAG = EVENTS + /* glsl */`
 uniform float uLevels, uGrid, uWire, uFine, uColorAmt;
 uniform float uScanX, uScanDir, uReveal, uMapping, uPhotoA, uScanA;
 uniform float uShowContours, uShowWire, uShowRidges, uShowScan, uShowFlares, uShowDecay;
-uniform float uShowCore, uShowPixels, uShowReveal, uShowWaves, uShowInterf, uShowMemory, uShowUnder;
-uniform float uUnder;
+uniform float uShowCore, uShowPixels, uShowReveal, uShowWaves, uShowInterf, uShowMemory;
 uniform vec2 uFocal;                 // the epicenter (analysis coords, y down)
 uniform float uCore, uCoreR;
 uniform vec4 uWv[${WV}];             // waves: x y (analysis coords), start time, strength
@@ -170,8 +169,6 @@ void main() {
   // local reveal: a small patch of the photo where a sound just happened
   col += photo(p) * min(1.0, rev) * 0.75 * uShowReveal;
 
-  // MEASUREMENT: the photo lies underneath the flowing contour lines, in the map's perspective
-  col += photo(p) * uUnder * uShowUnder * (0.45 + 0.55 * vFog) * (1.0 - min(1.0, lines * 0.6));
   // READING: ahead of the scan the photograph itself lies on the terrain; behind it only the map remains
   col = mix(photo(p) * uPhotoA * (0.55 + 0.45 * vFog), col, revealed);
   float coh = coherence(p);
@@ -181,7 +178,7 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-const SHOW = ['Contours', 'Wire', 'Ridges', 'Scan', 'Flares', 'Decay', 'Core', 'Pixels', 'Reveal', 'Waves', 'Interf', 'Memory', 'Under'];
+const SHOW = ['Contours', 'Wire', 'Ridges', 'Scan', 'Flares', 'Decay', 'Core', 'Pixels', 'Reveal', 'Waves', 'Interf', 'Memory'];
 
 export class Terrain extends Layer {
   constructor(ctx) {
@@ -208,7 +205,7 @@ export class Terrain extends Layer {
       uEv: { value: this.ev }, uEvB: { value: this.evB }, uWv: { value: this.wv },
       uLevels: { value: P.levels }, uGrid: { value: P.grid }, uWire: { value: 1 }, uFine: { value: 0 }, uColorAmt: { value: 0.3 },
       uScanX: { value: 0 }, uScanDir: { value: 1 }, uReveal: { value: 0 }, uMapping: { value: 1 }, uPhotoA: { value: 1 }, uScanA: { value: 1 },
-      uFocal: { value: new THREE.Vector2(map.focal.x, map.focal.y) }, uCore: { value: 0.5 }, uCoreR: { value: 0.18 }, uUnder: { value: 0.3 },
+      uFocal: { value: new THREE.Vector2(map.focal.x, map.focal.y) }, uCore: { value: 0.5 }, uCoreR: { value: 0.18 },
       uWaveV: { value: 0.2 }, uWaveR: { value: 0.55 },
     };
     for (const n of SHOW) own['uShow' + n] = { value: 1 };
@@ -255,16 +252,16 @@ export class Terrain extends Layer {
     const u = this.u, P = this.ctx.map.params;
     u.uScanX.value = s.scan.x; u.uScanDir.value = 1; u.uReveal.value = s.scan.reveal; u.uMapping.value = s.scan.mapping ? 1 : 0; u.uScanA.value = s.scan.alpha ?? 1;
     // wireframe vs contour states over the piece (graphic images keep more wire)
-    const base = { READING: 0.35, LIFE: 0.1 }[s.section] ?? 0.2;
+    const base = { READING: 1, AWAKENING: 0.3, LIFE: 0.06, DECAY: 0.3, END: 0.5 }[s.section] ?? 0.2;
     const wTarget = Math.min(1, base + P.terraced * 0.3 + s.kick * 0.25);
     if (this.wire === null) this.wire = wTarget;                              // a jump into the piece starts in the right state
     this.wire += (wTarget - this.wire) * Math.min(1, s.dt * (wTarget > this.wire ? 12 : 1.5));
-    const fTarget = { READING: 0.12 + 0.3 * s.scan.reveal, LIFE: 0.3 }[s.section] ?? 0;
+    const fTarget = { READING: 0, AWAKENING: 0.1, LIFE: 0.15 + 0.5 * s.energy, DECAY: 0.3, END: 0.2 }[s.section] ?? 0;
     if (this.fine === null) this.fine = fTarget;
     this.fine += (fTarget - this.fine) * Math.min(1, s.dt * 0.5);
     u.uWire.value = this.wire; u.uFine.value = this.fine;
     u.uColorAmt.value = 0.22 + 0.35 * s.energy;
-    u.uCore.value = 0; u.uUnder.value = 0.24 + 0.1 * s.scan.reveal;
+    u.uCore.value = s.section === 'READING' ? 0.35 : 0.42;
     u.uWaveV.value = this.ctx.waveV / (this.ctx.stepDur || 0.14);
     // superposition: the ghosts flicker for a bar, then collapse onto the one state on the strong beat
     const t = s.t, sp = this.sup;

@@ -9,8 +9,7 @@ import { analyzeImage, rasterize } from './analysis.js';
 import { extractStructures } from './structures.js';
 import { preloadFaceDetector, detectFace } from './face.js';
 import { buildMap, heightAt } from './map.js';
-import { Composer, STEPS, LAYERS, ACTS } from './audio/composer.js';
-import { planJourney } from './journey.js';
+import { Composer, STEPS, LAYERS } from './audio/composer.js';
 import { AudioEngine } from './audio/engine.js';
 import { Visuals, VISUAL_LAYERS } from './visuals/engine.js';
 import { Recorder } from './recorder.js';
@@ -134,9 +133,7 @@ async function begin(src, name, signatureBytes = null) {
   pushReadout(`terrain: relief ${fmt(P.relief)} · ridges ${fmt(P.ridged)} · ${P.levels} levels${P.terraced > 0.2 ? ' · terraced' : ''}`);
   await wait(450);
   if (gen !== app.generation) return;
-  const journey = app.journey = planJourney(analysis, map, (hashParams.get('spectra') || '').toUpperCase().split(',').filter(Boolean));
-  pushReadout(`spectra: <span class="hot">${journey.spectra.join(' → ')}</span>`);
-  const composer = app.composer = new Composer(analysis, map, journey);
+  const composer = app.composer = new Composer(analysis, map);
   const minutes = composer.loopBars * 16 * (60 / P.bpm / 4);
   pushReadout(`sound map: <span class="hot">${P.bpm.toFixed(1)} bpm · ${P.root.toFixed(2)} Hz · ${Math.floor(minutes / 60)}:${String(Math.round(minutes % 60)).padStart(2, '0')}</span>`);
   $('r-bpm').textContent = P.bpm.toFixed(1) + ' BPM';
@@ -147,7 +144,7 @@ async function begin(src, name, signatureBytes = null) {
 
   audio.loadPiece(composer, analysis, P);
   visuals.stepDur = 60 / P.bpm / 4;
-  visuals.beginMap(map, app.st, composer, journey);
+  visuals.beginMap(map, app.st, composer.org);
   app.marks = map.marks.map((m, i) => ({ ...m, id: (m.kind[0].toUpperCase()) + i }));
   if (!audio.running) {
     const ok = await audio.unlock();
@@ -203,8 +200,8 @@ function readingLines(a) {
   ];
 }
 
-// ── the hand: hover = the quantum lens + the force + a whisper of sound; drag (act 1) = rotate the map ──
-let uiTimer = 0;
+// ── the hand: hover = force field, drag = rotate the map, still press = the photograph ──
+let uiTimer = 0, holdTimer = 0;
 function showUI() {
   body.classList.add('ui');
   clearTimeout(uiTimer);
@@ -215,13 +212,12 @@ function move(e) {
   const P = app.pointer, now = performance.now();
   const dt = Math.max(0.001, (now - (P.lt || 0)) / 1000);
   const x = e.clientX, y = e.clientY;
-  P.inside = !onUI(e);
-  if (app.state === 'playing' && P.inside && P.lt && dt < 0.2) {
-    if (P.down && app.act === 'MEASUREMENT') setYaw(app.yaw + (x - P.lx) * 0.006);   // drag rotates the map (act 1)
-    else { visuals.force(P.lx, P.ly, x, y, dt); edgeCrossing(P.lx, P.ly, x, y); }
-    const d = Math.hypot(x - P.lx, y - P.ly);
-    if (d > 0.5) P.rest = now;
-    P.speed = Math.min(1, d / dt / 1500);
+  if (app.state === 'playing' && !onUI(e) && P.lt && dt < 0.2) {
+    if (P.down && !P.holding) setYaw(app.yaw + (x - P.lx) * 0.006);         // drag rotates the map
+    else if (!P.down) { visuals.force(P.lx, P.ly, x, y, dt); edgeCrossing(P.lx, P.ly, x, y); }
+    P.moved = (P.moved || 0) + Math.hypot(x - P.lx, y - P.ly);
+    if (P.moved > 14 && holdTimer && !P.holding) { clearTimeout(holdTimer); holdTimer = 0; }
+    if (P.holding) visuals.observe(x, y, true);
   }
   P.lx = x; P.ly = y; P.lt = now; P.x = x; P.y = y;
 }
@@ -230,7 +226,7 @@ function edgeCrossing(x0, y0, x1, y1) {
   const steps = Math.min(24, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 4));
   let prev = null;
   for (let k = 0; k <= steps; k++) {
-    const [ix, iy] = visuals.screenToPlane(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps);
+    const [ix, iy] = visuals.screenToImage(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps);
     if (ix < 0 || iy < 0 || ix >= 1 || iy >= 1) continue;
     const m = st.edgeMag[Math.floor(iy * st.edgeH) * st.edgeW + Math.floor(ix * st.edgeW)];
     const on = m > 0.35;
@@ -238,33 +234,25 @@ function edgeCrossing(x0, y0, x1, y1) {
     prev = on;
   }
 }
-/** Per frame: the lens grows while the cursor rests; the whisper follows brightness and movement. */
-function hand(now, dt) {
-  const P = app.pointer, a = app.analysis;
-  const live = app.state === 'playing' && P.inside && P.lt && !['ABSORPTION', 'END'].includes(app.act);
-  const rest = (now - (P.rest || 0)) / 1000;
-  visuals.observe(P.x || 0, P.y || 0, live ? 0.3 + 0.6 * smoothstep(0.25, 1.4, rest) : 0);
-  P.speed = (P.speed || 0) * Math.exp(-dt * 4);
-  if (live && a) {
-    const [ix, iy] = visuals.screenToPlane(P.x || 0, P.y || 0);
-    const inImg = ix >= 0 && iy >= 0 && ix < 1 && iy < 1;
-    const lum = inImg ? a.maps.L[Math.floor(iy * a.height) * a.width + Math.floor(ix * a.width)] : 0;
-    audio.hover(lum, inImg ? P.speed : 0);
-  } else audio.hover(0, 0);
+function release() {
+  const P = app.pointer; P.holding = false; P.down = false;
+  clearTimeout(holdTimer); holdTimer = 0;
+  visuals.observe(P.x || 0, P.y || 0, false);
 }
-function release() { const P = app.pointer; P.down = false; }
 addEventListener('pointermove', (e) => { move(e); if (e.pointerType === 'mouse') showUI(); }, { passive: true });
 addEventListener('pointerdown', (e) => {
   if (!app.paused) audio.unlock();
   if (app.awaitTap) { const r = app.awaitTap; app.awaitTap = null; r(); }
-  const P = app.pointer; P.lx = P.x = e.clientX; P.ly = P.y = e.clientY; P.lt = performance.now(); P.inside = !onUI(e);
+  const P = app.pointer; P.moved = 0; P.lx = P.x = e.clientX; P.ly = P.y = e.clientY; P.lt = performance.now();
   showUI();
   if (app.state !== 'playing' || onUI(e)) return;
   P.down = true;
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => { holdTimer = 0; P.holding = true; visuals.observe(P.x, P.y, true); }, 380);
 });
 addEventListener('pointerup', release);
 addEventListener('pointercancel', release);
-document.addEventListener('mouseleave', () => { release(); app.pointer.lt = 0; app.pointer.inside = false; });
+document.addEventListener('mouseleave', () => { release(); app.pointer.lt = 0; });
 addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('input')) return;
   if (e.key === 'm' || e.key === 'M') toggleMixer();
@@ -321,24 +309,20 @@ async function stopRecording() {
 
 // ── mixer (M): sound + visual layers, mute / solo, copy settings ──
 const SOUND_INFO = {
-  SUB: 'sub pressure under the scan / drones', PULSE: 'gated sub fragments, irregular', PRESSURE: 'deep sub swell (entropy, absorption)',
-  HUM: 'faint machine hum', RESONANCE: 'valleys ring: slow low sines', CLICK: 'edges and columns: precise clicks',
-  NOISE: 'gated noise bursts at rough places', DATA: 'pixel rows / dial pulses', FIELD: 'data texture: crushed slivers',
-  SCANNER: 'the read head: dry micro-ticks', GLITCH: 'cuts and hard edges', KICK: 'single impacts at the cuts only',
-  TONE: 'one low interval (absorption)', CRASH: 'the end', HAND: 'cursor: low whisper + edge clicks',
+  HEART: 'the epicenter beats: sub lub-dub', PEAKS: 'summits pulse in their own periods', NERVES: 'impulses arrive at nodes: clicks',
+  INTERFERENCE: 'two waves meet: accent', MEMORY: 'the scan, re-sequenced', EROSION: 'light reaches a valley: ticks',
+  KICK: 'heart meets a peak · collapses', SUB: 'sub pressure (reading, decay)', HUM: 'faint machine hum',
+  RESONANCE: 'valleys ring: slow low sines', SCANNER: 'the read head: dry micro-ticks', CLICK: 'hard edges under the scan',
+  NOISE: 'overload: gated noise bursts', GLITCH: 'hardest edges · collapses', TONE: 'one low interval (decay)', CRASH: 'the end: the image is consumed',
 };
 const VISUAL_INFO = {
-  TERRAIN: 'act 1: the measured terrain', CONTOURS: 'contour lines, photo colours', WIREFRAME: 'wire state', RIDGES: 'ridge hatching',
-  SCAN: 'the scan line', FLARES: 'local light per sound', DEFORM: 'ripples, spikes, tears', PHOTO: 'the photo under the lines (act 1)',
-  REVEAL: 'photo patch where a sound is', 'EDGE FLASH': 'hard edges flash (frames)', MATRIX: 'spectrum: data cells', RASTER: 'spectrum: scanlines',
-  ORBIT: 'spectrum: rings around lights', FLOW: 'spectrum: streaks along the flow', DISSOLUTION: 'spectrum: pixel particles',
-  ENTROPY: 'act 3: the particle field', SUPERPOSITION: 'ghost states → collapse', SINGULARITY: 'act 4: the black disc + ring',
-  DEBRIS: 'what remains after the crash', SLICING: 'transitions: displaced bands', LENS: 'cursor: the state collapses around it',
-  'DATA STRIP': 'thin barcode at the bottom edge', ANNOTATIONS: 'labels on the map (act 1)', CRASH: 'the final white flash', HAND: 'cursor force field',
-};
-const ACT_INFO = {
-  OFFERING: 'the photo, intact, once', MEASUREMENT: 'terrain + scan, photo underneath', DECOMPOSITION: 'the image\'s 2–3 spectra',
-  ENTROPY: 'one particle field, densest', ABSORPTION: 'into the singularity', END: 'the crash, then debris',
+  TERRAIN: 'the whole terrain mesh', CONTOURS: 'contour lines, photo colours', WIREFRAME: 'wireframe state', RIDGES: 'ridge hatching on edges',
+  SCAN: 'scan line (reading)', FLARES: 'local light per sound event', DEFORM: 'ripples, spikes, tears', DECAY: 'erosion front, broken lines',
+  'PHOTO CORE': 'photo near the epicenter → pixels', PIXELS: 'single photo pixels, glow on sound', REVEAL: 'photo patch where a sound is',
+  HEART: 'rings at the epicenter, lub-dub', WAVES: 'pulse waves across the lines', PEAKS: 'awake summits, their pulses',
+  INTERFERENCE: 'where two waves cross', NERVES: 'circuit traces + impulses', MEMORY: 'ghost of the scan where it heard',
+  EROSION: 'light draining downhill', SUPERPOSITION: 'ghost states → collapse', 'EDGE FLASH': 'hard edges flash (frames)',
+  CRUMBLE: 'border particles (decay)', ANNOTATIONS: 'labels on the map', CRASH: 'the final white flash', HAND: 'cursor force field',
 };
 const mixer = { rows: {}, open: false };
 function mixRow(box, name, info, isSound) {
@@ -351,23 +335,35 @@ function mixRow(box, name, info, isSound) {
   box.appendChild(row);
   return { row, dot: row.querySelector('.mx-dot'), bar: row.querySelector('.mx-meter i') };
 }
-// the acts: where the piece is, and a jump to each (for feedback)
-function jumpTo(act) {
-  const C = app.composer; if (!C || app.state !== 'playing') return;
-  const sec = C.sections.find((x) => x.name === act);
-  const bar = act === 'OFFERING' || act === 'MEASUREMENT' ? 0 : sec ? sec.start : 0;
-  app.form = bar > 0 ? 1 : app.form; audio.start(bar);
-}
+// the phase-2 systems and add-ons: one switch each, for their sound and their visuals together
+const SYSTEMS = {
+  HEARTBEAT: { sound: ['HEART'], visual: ['HEART', 'WAVES'], info: 'A · the epicenter beats, waves run out' },
+  POLYRHYTHM: { sound: ['PEAKS'], visual: ['PEAKS'], info: 'A · peaks pulse in their own periods' },
+  INTERFERENCE: { sound: ['INTERFERENCE'], visual: ['INTERFERENCE'], info: 'A · where waves meet: line + accent' },
+  'NERVOUS SYSTEM': { sound: ['NERVES'], visual: ['NERVES'], info: 'B · traces grow, impulses click' },
+  MEMORY: { sound: ['MEMORY'], visual: ['MEMORY'], info: 'the scan, re-sequenced' },
+  EROSION: { sound: ['EROSION'], visual: ['EROSION'], info: 'C · light drains downhill, ticks' },
+  SUPERPOSITION: { sound: [], visual: ['SUPERPOSITION'], info: 'E · ghost states, collapse' },
+  'PHOTO ON MAP': { sound: [], visual: ['PHOTO CORE', 'PIXELS', 'REVEAL'], info: 'core, pixels, local reveals' },
+};
+const sysOn = (n) => SYSTEMS[n].sound.every((L) => !audio.mute[L]) && SYSTEMS[n].visual.every((V) => !visuals.vis[V].mute);
 function syncMixerButtons() {
   for (const L of LAYERS) { const b = mixer.rows[L].row.querySelectorAll('button'); b[0].classList.toggle('on', !!audio.mute[L]); b[1].classList.toggle('on', !!audio.solo[L]); }
   for (const V of VISUAL_LAYERS) { const b = mixer.rows['v:' + V].row.querySelectorAll('button'); b[0].classList.toggle('on', visuals.vis[V].mute); b[1].classList.toggle('on', visuals.vis[V].solo); }
+  for (const n in SYSTEMS) { const b = mixer.rows['s:' + n].btn; const on = sysOn(n); b.textContent = on ? 'on' : 'off'; b.classList.toggle('on', on); }
 }
-for (const n of ACTS) {
+for (const n in SYSTEMS) {
   const row = document.createElement('div'); row.className = 'mx-row sys';
-  row.innerHTML = `<span class="mx-dot"></span><span class="mx-name">${n}</span><span class="mx-desc">${ACT_INFO[n]}</span><button title="jump to this act">go</button>`;
-  row.querySelector('button').addEventListener('click', () => jumpTo(n));
+  row.innerHTML = `<span class="mx-dot"></span><span class="mx-name">${n}</span><span class="mx-desc">${SYSTEMS[n].info}</span><button title="system on/off">on</button>`;
+  const btn = row.querySelector('button');
+  btn.addEventListener('click', () => {
+    const off = sysOn(n);
+    for (const L of SYSTEMS[n].sound) audio.setMute(L, off);
+    for (const V of SYSTEMS[n].visual) visuals.setVisual(V, 'mute', off);
+    syncMixerButtons();
+  });
   $('mx-sys').appendChild(row);
-  mixer.rows['a:' + n] = { row, dot: row.querySelector('.mx-dot') };
+  mixer.rows['s:' + n] = { row, btn, dot: row.querySelector('.mx-dot') };
 }
 for (const L of LAYERS) mixer.rows[L] = mixRow($('mx-rows'), L, SOUND_INFO[L], true);
 for (const V of VISUAL_LAYERS) mixer.rows['v:' + V] = mixRow($('mx-vis'), V, VISUAL_INFO[V], false);
@@ -376,8 +372,8 @@ $('r-title').addEventListener('click', toggleMixer);
 $('mx-copy').addEventListener('click', async () => {
   const state = (m, s) => (s ? 'SOLO' : m ? 'mute' : 'on');
   const text = [
-    `photo→sound mixer · round 6 · sig ${app.analysis?.signature || '-'} · ${audio.loopMode ? 'loop' : 'once'}`,
-    `journey: ${app.journey ? app.journey.spectra.join('→') : '-'} · acts ${app.composer ? app.composer.sections.map((x) => x.bars).join('-') : '-'} · now ${app.state === 'playing' ? app.act : app.state}`,
+    `photo→sound mixer · round 5 · sig ${app.analysis?.signature || '-'} · ${audio.loopMode ? 'loop' : 'once'}`,
+    'systems: ' + Object.keys(SYSTEMS).map((n) => `${n.replace(/ /g, '_')}=${sysOn(n) ? 'on' : 'off'}`).join('  '),
     'sound:  ' + LAYERS.map((L) => `${L}=${state(audio.mute[L], audio.solo[L])}`).join('  '),
     'visual: ' + VISUAL_LAYERS.map((V) => `${V}=${state(visuals.vis[V].mute, visuals.vis[V].solo)}`).join('  '),
   ].join('\n');
@@ -398,7 +394,11 @@ function updateMixer() {
     r.bar.style.width = Math.min(100, (lv[L] || 0) * 260) + '%';
   }
   for (const V of VISUAL_LAYERS) mixer.rows['v:' + V].row.classList.toggle('off', !visuals.visOn(V));
-  for (const n of ACTS) mixer.rows['a:' + n].dot.classList.toggle('hit', app.state === 'reading' ? n === 'OFFERING' : app.state === 'playing' && app.act === n);
+  for (const n in SYSTEMS) {
+    const r = mixer.rows['s:' + n];
+    r.dot.classList.toggle('hit', SYSTEMS[n].sound.some((L) => act.includes(L)));
+    if (r.btn.classList.contains('on') !== sysOn(n)) syncMixerButtons();
+  }
   $('mx-count').textContent = `${audio.activeLayers(2).length} sounding`;
 }
 
@@ -419,19 +419,18 @@ function frame(now) {
     const C = app.composer;
     pos = audio.position();
     const lb = pos.loopBarF, sec = pos.section;
-    const scan = C.scanAt(lb);
+    const scan = C.scanAt(lb); scan.dir = 1;
     app.form = Math.max(app.form, smoothstep(0, 2.5, pos.barF));                  // the photograph folds into a terrain
+    const decay = smoothstep(C.L.start + C.L.bars * 0.8, C.Dc.start, lb) * 0.12 + smoothstep(C.Dc.start, C.endBar, lb) * 0.88;
+    const fade = 1 - smoothstep(C.endBar + 0.05, C.endBar + 0.6, lb);
     app.energy += (C.energyAt(lb) - app.energy) * Math.min(1, dt * 0.6);
-    app.act = sec.name;
     const lv = audio.levels();
-    low = clamp(((lv.SUB || 0) + (lv.PRESSURE || 0) * 1.2 + (lv.HUM || 0) * 1.5 + (lv.PULSE || 0) * 0.6) * 5);
-    st = { act: sec.name, lb, scan, energy: app.energy, form: app.form, fade: 1, stepF: pos.stepF, spectrum: C.spectrumAt(lb)?.name };
+    low = clamp(((lv.SUB || 0) + (lv.HEART || 0) * 1.3 + (lv.HUM || 0) * 1.5 + (lv.KICK || 0) * 0.4 + (lv.PEAKS || 0) * 0.3) * 5);
+    st = { section: sec.name, energy: app.energy, scan, decay, form: app.form, fade, lb, g: sec.name === 'LIFE' ? (lb - C.L.start) / C.L.bars : sec.name === 'DECAY' || sec.name === 'END' ? 1 : 0 };
     for (const ev of audio.drain(audio.heardTime())) { visuals.trigger(ev); note(ev, now); }
     // one shot: after the crash the system asks for a new image
-    // one shot: after the crash only the debris remains for a moment; then the system asks for a new image
-    if (!audio.loopMode && lb >= C.endBar + 2.6 && pos.loop === 0) { endPiece(); return; }
+    if (!audio.loopMode && lb >= C.endBar + 1.6 && pos.loop === 0) { endPiece(); return; }
   }
-  hand(now, dt);
   visuals.frame({ dt, playing: !app.paused, intro: app.intro, low, state: st });
   drawOverlay(now, pos, st);
   if (now - lastReadout > 66) { lastReadout = now; updateCorners(pos); updateMixer(); }
@@ -440,12 +439,17 @@ requestAnimationFrame(frame);
 
 /** Some events leave a short-lived technical note on the map, at their place. */
 function note(ev, now) {
-  if (ev.x === undefined || app.act !== 'MEASUREMENT') return;
+  if (ev.x === undefined) return;
   const hex = () => Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
   let text = null;
   if (ev.type === 'glitch') text = `ERR ${hex()}`;
   else if (ev.type === 'data') text = ev.kind === 'dial' ? `DIAL ${ev.count}` : `DATA ${hex()}`;
   else if (ev.type === 'res') text = `RES ${ev.freq.toFixed(1)} Hz`;
+  else if (ev.type === 'awake') text = `P${ev.id} AWAKE · ${ev.period}/16`;
+  else if (ev.type === 'interf') text = `INT ${(ev.ang * 180 / Math.PI).toFixed(0)}°`;
+  else if (ev.type === 'memory' && ev.first) text = `MEM R${String(ev.rec).padStart(2, '0')}`;
+  else if (ev.type === 'superpose') text = '|ψ⟩ = Σ 3 states';
+  else if (ev.type === 'kick' && ev.collapse) text = 'COLLAPSE';
   if (text) app.notes.push({ x: ev.x, y: ev.y, text, t: now, life: ev.type === 'res' ? 1600 : 650 });
 }
 
@@ -478,9 +482,8 @@ function drawOverlay(now, pos, st) {
     octx.fillText((p * a.height * 8 | 0).toString().padStart(4, '0'), r.x + r.w + 16, y + 3);
     return;
   }
-  if (st && app.map && visuals.visOn('DATA STRIP')) dataStrip(st, W, H);
-  if (!st || !app.map || !visuals.visOn('ANNOTATIONS') || st.act !== 'MEASUREMENT') return;
-  const P = app.map.params, al = Math.min(1, app.form) * (st.scan.alpha ?? 1);
+  if (!st || !app.map || !visuals.visOn('ANNOTATIONS') || st.fade < 0.05) return;
+  const P = app.map.params, al = (st.fade ?? 1) * Math.min(1, app.form);
   const flick = visuals.env.data > 0.3 && Math.random() < 0.5 ? 0.25 : 1;    // data sounds make the labels flicker
   // map frame: coordinate ticks along two edges
   octx.fillStyle = `rgba(232,238,242,${0.28 * al * flick})`; octx.strokeStyle = `rgba(232,238,242,${0.22 * al})`;
@@ -518,24 +521,6 @@ function drawOverlay(now, pos, st) {
     const k = 1 - (now - n.t) / n.life;
     octx.fillStyle = `rgba(235,250,255,${0.55 * k * al * (Math.random() < 0.15 ? 0.3 : 1)})`;
     octx.fillText(n.text, x + 5, y + 10);
-  }
-}
-
-/** A thin barcode at the bottom edge: the current state of the image, as data (Ikeda). */
-function dataStrip(st, W, H) {
-  const M = app.map, C = app.composer, N = 128, bw = W / N, g = M.grid;
-  const t = (st.stepF || 0), act = st.act;
-  if (act === 'END') return;
-  for (let i = 0; i < N; i++) {
-    const c = Math.floor(i / N * 64);
-    let v = 0;
-    if (act === 'MEASUREMENT') v = i / N <= st.scan.x ? M.col[c].hMean : 0;
-    else if (act === 'DECOMPOSITION') { const r = Math.floor((t * 0.25 + i * 0.37) % 32); v = g.edge[r * 64 + c] * 1.6; }
-    else if (act === 'ENTROPY') v = Math.random() < st.energy * 0.55 ? Math.random() : 0;
-    else if (act === 'ABSORPTION') { const fx = M.focal.x, p = (st.lb - C.Ab.start) / C.Ab.bars; v = Math.abs(i / N - fx) < (1 - p) * 0.5 ? M.col[c].hMean * (1 - p) : 0; }
-    if (v < 0.08) continue;
-    octx.fillStyle = `rgba(235,240,245,${Math.min(0.5, v * 0.45)})`;
-    octx.fillRect(Math.floor(i * bw), H - 3, Math.max(1, Math.floor(bw * (v > 0.5 ? 0.9 : 0.45))), 2);
   }
 }
 

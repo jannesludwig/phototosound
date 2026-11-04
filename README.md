@@ -1,31 +1,28 @@
-# Photo to Sound — "The Transmission"
+# Photo to Sound
 
-You sacrifice a photograph. It is beamed into another dimension: measured,
-decomposed into its spectra, dissolved into entropy and absorbed by a
-singularity. Only debris remains.
+A photograph becomes a **sound map**: a tilted terrain of thin lines on
+black. A scan line reads it once, and what it hears is recorded. Then the map
+**comes alive** as a technical, quantum-mechanical organism:
 
-The piece lasts about 3 minutes and runs once:
+- a heart beats at the photo's focal point
+- the other peaks pulse in their own periods
+- nerves grow from the heart and click when impulses arrive
+- waves interfere
 
-| Act | What happens |
-|---|---|
-| 0 OFFERING | the photo, intact, the only time |
-| 1 MEASUREMENT | the photo tilts into a terrain of contour lines and one scan line measures it |
-| 2 DECOMPOSITION | the image is split into 2–3 of its spectra (RASTER, ORBIT, DISSOLUTION, FLOW, MATRIX), chosen by the image |
-| 3 ENTROPY | everything becomes one Brownian particle field |
-| 4 ABSORPTION | it falls into a singularity at the photo's focal point |
-| END | one white flash, then debris |
+Finally the organism overloads and erodes, and the piece ends with one white
+flash, the crash. Every rhythm comes from the geometry of the image, and
+every sound lights up the place on the map that made it. The photo stays
+visible on the terrain, most clearly at the epicenter.
 
-References are Ryoji Ikeda, Alva Noto, Ryoichi Kurokawa and Robert Henke.
-The look is technical, mystical, dark, raw and minimal.
+References are Alva Noto, Ryoji Ikeda and Raster-Noton. The look is
+technical, organic, dark and minimal.
 
 A hash of the file seeds every choice, so the same photo always produces the
-same piece, and different photos take different journeys. Everything runs in
-the browser and the photo is never uploaded. Only three.js, MediaPipe and the
-face model are downloaded from CDNs.
+same piece. Everything runs in the browser and the photo is never uploaded.
+Only three.js, MediaPipe and the face model are downloaded from CDNs.
 
-See `docs/ROUND6.md` for the acts, how the image decides the journey, the
-interaction, and every layer name, and `docs/RESEARCH_R6.md` for the
-research. Earlier rounds are in `docs/ROUND5.md`, `docs/ROUND4.md`,
+See `docs/ROUND5.md` for the story and its timing, how each system is derived
+from the image, and every layer name. Earlier rounds are in `docs/ROUND4.md`,
 `docs/ROUND3.md` and `docs/V1_VS_V2.md`.
 
 ## Run
@@ -42,46 +39,87 @@ python3 -m http.server 8000
 | Link | What it does |
 |---|---|
 | `#demo=ii` | loads a demo image |
-| `#section=ENTROPY&at=4` | jumps to bar 4 of an act |
-| `#spectra=FLOW,ORBIT` | forces the spectra |
+| `#section=LIFE&at=20` | jumps to bar 20 of a section |
 | `#bar=40` | jumps to a bar |
 | `#loop=1` | starts in loop mode |
 
-## Interaction
+## Experience
 
-- **The cursor is an observer.** Where it rests, the state collapses and a
-  glimpse of the measured photo appears.
-- **The cursor is a force.** Lines, cells and particles are pushed aside
-  and spring back.
-- **The cursor has a sound.** A whisper of a low sine follows the brightness
-  under it, and fine clicks mark hard edges.
-- **Rotation.** Dragging rotates the map in act 1.
+1. **Landing.** A black screen, one line, a near-invisible drop zone, and
+   `demo i ii iii`.
+2. **Analysis.** The photo appears and is analysed. Readouts name the focal
+   point, the terrain and the sound map.
+3. **The piece**, about 3 to 3.5 minutes, runs once by default:
 
-**Controls** appear on hover: pause, new, volume, rec (WebM) and once/loop.
-**M** opens the mixer (acts with jumps, every sound and visual layer, copy
-settings).
+| Phase | Sound | Image |
+|---|---|---|
+| READING | sub, edge clicks, the read head's dry ticks (recorded) | the photo tilts back into 3D and morphs into contour lines behind the scan |
+| AWAKENING | near silence, then the first heartbeat | the heart's rings appear at the epicenter |
+| LIFE | heart, nerves, peaks, interference, memory, kicks; erosion late. Layers enter one by one, at most ~6 | waves, growing circuit traces with impulses, pulsing peaks; the photo held at the epicenter; 2 superpositions |
+| DECAY | the heart stumbles, peaks sleep, the rhythm fragments, one low tone, erosion ticks | an erosion front eats inward; nerves die from the leaves; the core goes last |
+| END | the crash | the only full-screen white flash, then back to the upload screen |
+
+The **loop** toggle at the bottom plays the piece again instead of asking for
+a new image.
+
+**The hand.**
+
+- The slider on the right edge rotates the map, and so does click-dragging.
+- The cursor bends the terrain as a force field.
+- Crossing a strong edge makes a click.
+- A still press reveals the photo on the terrain under the finger.
+
+**Controls** appear on hover or tap: pause, new, volume, rec (WebM) and loop.
+
+**M opens the mixer:**
+
+- **systems**: one switch per system (HEARTBEAT, POLYRHYTHM, INTERFERENCE,
+  NERVOUS SYSTEM, MEMORY, EROSION, SUPERPOSITION, PHOTO ON MAP)
+- every **sound** and **visual** layer, with mute, solo and meters
+- **copy settings**
+
+## Image → organism → sound
+
+| From the image | System | Sound |
+|---|---|---|
+| focal point (eye, light, most salient place) | the heart, the epicenter | HEART: sub lub-dub; waves run out |
+| other summits (height → period, position → phase) | peaks, a polyrhythm in a 2-bar cycle | PEAKS: low sine knocks |
+| hard edges, ridges, rough places, linked from the heart | the nervous system (circuit traces) | NERVES: clicks / noise grains when impulses arrive; path length = timing |
+| where two waves meet | interference | INTERFERENCE: crushed click doublet + noise slab |
+| what the scan heard while reading | memory | MEMORY: re-sequenced, crushed fragments |
+| steepest descent from peaks into valleys | erosion | EROSION: fine ticks on arrival |
+| brightness | tempo (100–114 BPM) and root | — |
+
+**Timing.**
+
+- A worker clock schedules 150 ms ahead from integer step indices, with
+  micro-timing from the geometry.
+- Every scheduled sound also goes to a queue that the visuals read against
+  the same audio clock (one event → one place on the map).
 
 ## Files
 
 ```
-index.html               page, import map, always-on upload/drop script (Safari fix)
-css/style.css            gallery black, hairlines, monospace; yaw slider; mixer
-js/main.js               flow, UI, the hand (lens, force, whisper), overlay, data strip, mixer
-js/analysis.js           features, grid, palette, signature
-js/structures.js         edge strokes, iso-contours, straight segments
-js/face.js               MediaPipe face detection (box + eye keypoints)
-js/map.js                the sound map: height, ridges, texture, focal point, params
-js/journey.js            the image decides its journey: spectra, order, act lengths, camera, colour
-js/audio/composer.js     the acts: MEASUREMENT, DECOMPOSITION, ENTROPY, ABSORPTION, END
-js/audio/engine.js       round-4 voices + SCANNER, PRESSURE, FIELD, HAND; buses, scheduler
-js/visuals/engine.js     conducts the acts: camera, morphs, slicing, lens, crash
-js/visuals/terrain.js    act 1: terrain, contours, scan, the photo underneath
-js/visuals/edges.js      EDGE FLASH (act 1)
-js/visuals/field.js      the hand's force field
-js/visuals/common.js     terrain GLSL (height + pose), layer base
-js/spectra/*.js          the v1 worlds (RASTER, ORBIT, DISSOLUTION, FLOW, MATRIX), restored; their GLSL
-js/spectra/entropy.js    act 3–4: the particle field, superposition, singularity, debris
-js/demo.js               three procedural demo images
-Test_Images/             test photos
-docs/                    ROUND6 (current), RESEARCH_R6, ROUND5, ROUND4, ROUND3, V1_VS_V2, research
+index.html              page, import map, always-on upload/drop script (Safari fix)
+css/style.css           gallery black, hairlines, monospace; yaw slider; mixer
+js/main.js              flow, UI, annotations overlay, the hand, rotation, mixer (systems)
+js/analysis.js          features, grid, palette, signature
+js/structures.js        edge strokes, iso-contours, straight segments
+js/face.js              MediaPipe face detection (box + eye keypoints)
+js/map.js               the sound map: height, ridges, texture, focal point, params
+js/organism.js          heart, peaks, nerve tree, erosion streams — derived from the map
+js/audio/composer.js    the story (READING → AWAKENING → LIFE → DECAY → END), all systems
+js/audio/engine.js      voices, per-layer buses, scheduler, limiter, one-shot/loop
+js/visuals/engine.js    renderer, photo → terrain, projection, phase mix, layer toggles, crash
+js/visuals/terrain.js   terrain, photo core/pixels/reveal, waves, interference, flares, superposition
+js/visuals/orbit.js     HEART rings and PEAKS markers
+js/visuals/nerves.js    NERVES: circuit traces and impulses
+js/visuals/erosion.js   EROSION: light draining downhill
+js/visuals/edges.js     EDGE FLASH
+js/visuals/crumble.js   CRUMBLE: border particles in decay
+js/visuals/field.js     the hand's force field
+js/visuals/common.js    shared GLSL (terrain height + pose), layer base
+js/demo.js              three procedural demo images
+Test_Images/            test photos
+docs/                   ROUND5 (current), ROUND4, ROUND3, V1_VS_V2, TEST (round 3), research
 ```
