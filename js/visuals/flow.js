@@ -21,9 +21,7 @@ void main() {
   float l = luma(pc);
   vCol = mix(pc * 1.9 + 0.08, uAccent, 0.5 * step(0.96, fract(position.z * 97.13)));
   vA = aAlpha * uMix * (1.0 - coh) * (0.4 + 0.6 * smoothstep(0.02, 0.4, l)) * (0.8 + uKick * 0.6);
-  vec2 w = position.xy + fieldAt(position.xy) * 1.4;
-  w.y -= uFall * uFall * 0.3;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(w, 0.0, 1.0);  // (z = id, not depth)
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy, 0.0, 1.0);  // (z = id, not depth)
 }`;
 const FRAG = /* glsl */`
 varying vec3 vCol;
@@ -93,7 +91,7 @@ export class Flow extends World {
     // rolling pulse: a surge right after each beat, plus the kick itself
     const pulse = 0.5 + 0.9 * Math.pow(1 - (s.beatPhase || 0), 3) + s.kick * 0.9;
     this.surge += (pulse - this.surge) * Math.min(1, s.dt * 10);
-    const base = 0.16 * this.ctx.params.speed * (0.45 + 0.75 * s.tension) * this.surge;
+    const base = 0.16 * this.ctx.params.speed * (0.45 + 0.75 * s.energy) * this.surge;
     const scatter = s.noise * 0.012;
     const v = [0, 0];
     const P = this.pos, A = this.alpha, rng = this.rng;

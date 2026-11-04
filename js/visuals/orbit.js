@@ -32,7 +32,7 @@ float ringLine(float k, float px) {
 }
 
 void main() {
-  vec2 w = vW - fieldAt(vW);           // rings bend around the hand
+  vec2 w = vW;
   vec2 pImg = w / uHalf;
   float coh = coherence(pImg);
   float free = 1.0 - coh;
@@ -113,9 +113,6 @@ void main() {
   float om = aOrbit.w * 0.035 * uSpeed / pow(max(r, 0.02), 1.5) * 0.12;
   float a = aOrbit.z + uTime * om;
   vec2 p = c + vec2(cos(a), sin(a) * mix(1.0, 0.82, aSeed)) * r;
-  p += fieldAt(p) * 2.2;                // knocked out of orbit, swings back
-  p = mix(p, gridSnap(p, 56.0), sigOn(1.0));
-  p.y -= uFall * uFall * (0.1 + aSeed * 0.4);
   vec2 pImg = p / uHalf;
   float coh = coherence(pImg);
   vec3 pc = photo(pImg);
