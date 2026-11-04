@@ -66,10 +66,11 @@ export class Composer {
   planArc() {
     const f = this.f, S = this.S, rng = makeRng(this.seed ^ 0xa4c);
     const dark = clamp(1 - f.brightness * 1.8);
+    // ≈ 88 bars (≈ 3 min at 116–124 BPM); each image shifts the weight between sections
     const len = {
-      INTRO: 12 + 4 * Math.round(dark + S.silence),
-      BUILD: 24 + 4 * Math.round(f.edgeDensity + rng() * 0.6),
-      PEAK: 12 + 4 * Math.round(f.contrast * 2 + rng() * 0.4),
+      INTRO: 16 + 4 * Math.round(dark * 0.8 + S.silence * 0.6),
+      BUILD: 28 + 4 * Math.round(f.edgeDensity + rng() * 0.6),
+      PEAK: 16 + 4 * Math.round(f.contrast * 1.5 + rng() * 0.4),
       FALL: 12 + 4 * Math.round(S.silence + (f.face > 0 ? 1 : 0) * 0.6),
       SILENCE: 8,
     };

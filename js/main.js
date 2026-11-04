@@ -158,7 +158,9 @@ async function begin(src, name, signatureBytes = null) {
     if (!ok) { $('prompt').hidden = false; await new Promise((res) => { app.awaitTap = res; }); $('prompt').hidden = true; }
   }
   if (gen !== app.generation) return;
-  const startBar = +(hashParams.get('bar') || 0);   // debug: jump into the piece
+  // deep links: #bar=40  or  #section=PEAK&at=4
+  const secLink = app.composer.sections.find((x) => x.name === (hashParams.get('section') || '').toUpperCase());
+  const startBar = secLink ? secLink.start + +(hashParams.get('at') || 0) : +(hashParams.get('bar') || 0);
   if (startBar) app.form = 1;
   audio.start(startBar);
   setState('playing');
