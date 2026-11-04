@@ -30,7 +30,7 @@
   <div id="prompt" hidden>tap to listen</div>
 
   <!-- corner readouts -->
-  <div class="corner tl"><div>photo → sound</div><div id="r-sig">—</div></div>
+  <div class="corner tl"><div id="r-title">photo → sound</div><div id="r-sig">—</div></div>
   <div class="corner tr"><div id="r-bpm">—</div><div id="r-hz">—</div></div>
   <div class="corner bl"><div id="r-sec">—</div><div id="r-pos">—</div></div>
   <div class="corner br">
@@ -38,6 +38,13 @@
     <div id="r-xy">—</div>
     <ul id="worlds" hidden></ul>
   </div>
+
+  <!-- sound debug mixer: press M (or tap "photo → sound") -->
+  <aside id="mixer" hidden>
+    <div class="mx-head"><span>mixer</span><span id="mx-count">—</span></div>
+    <div id="mx-rows"></div>
+    <div class="mx-foot">M toggles · mute / solo per layer</div>
+  </aside>
 
   <!-- controls: appear on hover / tap -->
   <div id="controls">

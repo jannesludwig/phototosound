@@ -6,7 +6,7 @@
 import { analyzeImage, rasterize } from './analysis.js';
 import { preloadFaceDetector, detectFace } from './face.js';
 import { chooseWorlds, pieceParams, WORLDS } from './worlds.js';
-import { Composer, readWindow, STEPS } from './audio/composer.js';
+import { Composer, readWindow, STEPS, LAYERS } from './audio/composer.js';
 import { AudioEngine } from './audio/engine.js';
 import { Visuals } from './visuals/engine.js';
 import { Recorder } from './recorder.js';
@@ -279,6 +279,47 @@ function updateWorldLabel() {
   $('r-world').textContent = `${c.primary} × ${c.secondary}`;
 }
 
+// ── sound debug mixer (M) ──────────────────────────────────
+const LAYER_INFO = {
+  KICK: 'sine kick, pitch drop',
+  SUB: 'low sine: drone or gated pulses',
+  CLICK: 'v1 digital clicks',
+  NOISE: 'short gated noise bursts',
+  DATA: 'image rows as data / dial pulses',
+  GLITCH: 'white flash + digital glitch',
+  TONE: 'one low sine interval (after collapse)',
+};
+const mixer = { rows: {}, open: false };
+function buildMixer() {
+  const box = $('mx-rows'); box.innerHTML = '';
+  for (const L of LAYERS) {
+    const row = document.createElement('div'); row.className = 'mx-row';
+    row.innerHTML = `<span class="mx-dot"></span><span class="mx-name">${L}</span><span class="mx-desc">${LAYER_INFO[L]}</span><span class="mx-meter"><i></i></span><button title="mute">M</button><button title="solo">S</button>`;
+    const [mBtn, sBtn] = row.querySelectorAll('button');
+    mBtn.addEventListener('click', () => { audio.setMute(L, !audio.mute[L]); mBtn.classList.toggle('on', !!audio.mute[L]); });
+    sBtn.addEventListener('click', () => { audio.setSolo(L, !audio.solo[L]); sBtn.classList.toggle('on', !!audio.solo[L]); });
+    box.appendChild(row);
+    mixer.rows[L] = { row, dot: row.querySelector('.mx-dot'), bar: row.querySelector('.mx-meter i') };
+  }
+}
+function toggleMixer() { mixer.open = !mixer.open; $('mixer').hidden = !mixer.open; }
+buildMixer();
+addEventListener('keydown', (e) => { if (e.key === 'm' || e.key === 'M') { if (!e.target.closest || !e.target.closest('input')) toggleMixer(); } });
+$('r-title').addEventListener('click', toggleMixer);
+function updateMixer() {
+  if (!mixer.open) return;
+  const lv = audio.levels(), act = audio.activeLayers(0.15);
+  const inPiece = app.composer ? app.composer.layerSet : [];
+  for (const L of LAYERS) {
+    const r = mixer.rows[L];
+    r.row.classList.toggle('off', !inPiece.includes(L));
+    r.dot.classList.toggle('hit', act.includes(L));
+    r.bar.style.width = Math.min(100, (lv[L] || 0) * 260) + '%';
+  }
+  const sounding = audio.activeLayers(2).length;
+  $('mx-count').textContent = `${sounding}/5 sounding · ${inPiece.filter((L) => L !== 'TONE').length} in this piece`;
+}
+
 // ── frame loop ─────────────────────────────────────────────
 let last = performance.now(), lastReadout = 0;
 function frame(now) {
@@ -320,7 +361,7 @@ function frame(now) {
   visuals.frame(s);
   drawOverlay(now, pos);
 
-  if (now - lastReadout > 66) { lastReadout = now; updateCorners(pos); }
+  if (now - lastReadout > 66) { lastReadout = now; updateCorners(pos); updateMixer(); }
 }
 requestAnimationFrame(frame);
 
