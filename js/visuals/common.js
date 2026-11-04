@@ -28,6 +28,7 @@ uniform vec3  uAccent;
 uniform sampler2D uImage;
 uniform sampler2D uHeight; // r = height, g = ridges (edges), b = texture
 uniform float uAmp, uTilt, uYaw;
+uniform float uYawOff, uZOff;     // superposition ghosts only (0 elsewhere)
 uniform vec4  uRip[6];    // kick ripples: xy image, start time, strength
 uniform float uDeformOn;
 uniform sampler2D uField; // the hand's force field (bytes)
@@ -75,14 +76,14 @@ float terrainZ(vec2 p) {
     }
     z += (vnoise(p * 18.0 + uTime * 0.2) - 0.5) * 0.05 * uDecay;   // erosion as the image is consumed
   }
-  return z * uForm;
+  return z * uForm * (1.0 + uZOff) * (1.0 - 0.55 * uDecay);      // decay wears the terrain down
 }
 
 // Pose: yaw in the map plane, then tilt away from the viewer.
 vec3 mapPos(vec2 p, float z) {
   vec3 pos = vec3(p * uHalf, z);
   pos.xy += fieldAt(pos.xy);
-  float yaw = uYaw * uForm;
+  float yaw = uYaw * uForm + uYawOff;
   pos.xy = mat2(cos(yaw), sin(yaw), -sin(yaw), cos(yaw)) * pos.xy;
   float t = -uTilt * uForm;
   pos = vec3(pos.x, pos.y * cos(t) - pos.z * sin(t), pos.y * sin(t) + pos.z * cos(t));
