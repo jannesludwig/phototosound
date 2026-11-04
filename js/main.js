@@ -311,13 +311,13 @@ async function stopRecording() {
 const SOUND_INFO = {
   KICK: 'sine kick on the ridges · irregular', SUB: 'sub pressure under the scan', PULSE: 'gated sub pulses (intensify)',
   HUM: 'machine hum of the map', RESONANCE: 'valleys ring: slow low sines', CLICK: 'hard edges crossed by the scan',
-  NOISE: 'rough texture: gated bursts', DATA: 'image rows as data / dial pulses', TRANSMISSION: 'scanned columns sent as data',
+  NOISE: 'rough texture: gated bursts', DATA: 'image rows as data / dial pulses', SCANNER: 'the read head: dry micro-ticks',
   GLITCH: 'hardest edges: digital glitch', TONE: 'one low interval (consumption)', CRASH: 'the end: the image is consumed',
 };
 const VISUAL_INFO = {
   TERRAIN: 'the whole terrain mesh', CONTOURS: 'contour lines (3 densities)', WIREFRAME: 'wireframe state', RIDGES: 'ridge hatching on edges',
   SCAN: 'scan line + afterglow', FLARES: 'local flares per sound event', DEFORM: 'ripples, spikes, tears, erosion', DECAY: 'consumption: crumbling, breaking',
-  'EDGE FLASH': 'hard edges flash (frames)', ORBIT: 'rings at the focal point (sub)', CRUMBLE: 'border particles drift away', SLICING: 'rare quantum slicing',
+  'EDGE FLASH': 'hard edges flash (frames)', ORBIT: 'rings at the focal point (sub)', CRUMBLE: 'border particles drift away',
   ANNOTATIONS: 'labels on the map', CRASH: 'the final white flash', HAND: 'cursor force field',
 };
 const mixer = { rows: {}, open: false };
@@ -405,7 +405,6 @@ function note(ev, now) {
   const hex = () => Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
   let text = null;
   if (ev.type === 'glitch') text = `ERR ${hex()}`;
-  else if (ev.type === 'transmission') text = `TX ${ev.bits.slice(0, 12).join('')}`;
   else if (ev.type === 'data') text = ev.kind === 'dial' ? `DIAL ${ev.count}` : `DATA ${hex()}`;
   else if (ev.type === 'res') text = `RES ${ev.freq.toFixed(1)} Hz`;
   else if (ev.type === 'sub' && ev.focus) text = `FOCUS ${ev.freq.toFixed(1)} Hz`;

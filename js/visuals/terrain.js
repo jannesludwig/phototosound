@@ -50,7 +50,7 @@ void main() {
 
 const FRAG = EVENTS + /* glsl */`
 uniform float uLevels, uGrid, uWire, uFine, uColorAmt;
-uniform float uScanX, uScanDir, uReveal, uMapping;
+uniform float uScanX, uScanDir, uReveal, uMapping, uPhotoA;
 uniform float uShowContours, uShowWire, uShowRidges, uShowScan, uShowFlares, uShowDecay;
 varying vec2 vP;
 varying vec3 vM;
@@ -110,9 +110,10 @@ void main() {
   vec3 col = base * lines * (0.65 + 0.6 * uLow) * (1.0 + fl * 1.4) * (1.0 + trail * 0.9);
   col += vec3(1.0) * white * (lines + 0.15);
   col += vec3(1.0) * scan * 0.9 + uAccent * scan * 0.3;
-  col *= revealed;
-  col += vec3(0.6) * wire * 0.35 * (1.0 - revealed) * uMapping;              // the grid waits to be mapped
   col *= flick * (1.0 - broken * 0.85) * vFog;
+  // the first sweep turns the photograph into the map: ahead of the scan the photo itself lies on
+  // the terrain (same pose, same relief), behind it only the lines remain
+  col = mix(photo(p) * uPhotoA * (0.55 + 0.45 * vFog), col, revealed);
   col = mix(col, vec3(luma(col)), uDecay * 0.6);                             // colours drain as it is consumed
   float coh = coherence(p);
   col = col * (1.0 - coh) + photo(p) * coh;                                  // hold: the photograph shows through
@@ -146,7 +147,7 @@ export class Terrain extends Layer {
       uniforms: {
         uEv: { value: this.ev }, uEvB: { value: this.evB },
         uLevels: { value: P.levels }, uGrid: { value: P.grid }, uWire: { value: 1 }, uFine: { value: 0 }, uColorAmt: { value: 0.3 },
-        uScanX: { value: 0 }, uScanDir: { value: 1 }, uReveal: { value: 0 }, uMapping: { value: 1 },
+        uScanX: { value: 0 }, uScanDir: { value: 1 }, uReveal: { value: 0 }, uMapping: { value: 1 }, uPhotoA: { value: 1 },
         uShowContours: { value: 1 }, uShowWire: { value: 1 }, uShowRidges: { value: 1 }, uShowScan: { value: 1 }, uShowFlares: { value: 1 }, uShowDecay: { value: 1 },
       },
     });
@@ -168,7 +169,7 @@ export class Terrain extends Layer {
       case 'click': this.flare(1, ev.x, ev.y, ev.vel, 0.28, 0.07, h, now); break;
       case 'glitch': this.flare(2, ev.x, ev.y, 1, 0.5, 0.45, h, now); break;
       case 'noise': this.flare(3, ev.x, ev.y, 1, 0.22, 0.12, h, now); break;
-      case 'data': case 'transmission': this.flare(3, ev.x, ev.y, 0.6, 0.3, 0.06, h, now); break;
+      case 'data': case 'scanner': this.flare(3, ev.x, ev.y, 0.6, 0.3, 0.06, h, now); break;
       case 'kick': this.flare(4, ev.x, ev.y, ev.vel, 1.3, 0.1, h, now); break;
       case 'res': this.flare(5, ev.x, ev.y, 1, ev.dur * stepDur * 16, 0.3, h, now); break;
       case 'sub': if (ev.focus) this.flare(5, ev.x, ev.y, 1, 1.6, 0.14, h, now); break;

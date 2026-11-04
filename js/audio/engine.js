@@ -389,18 +389,17 @@ export class AudioEngine {
     for (const d of [0, 0.6]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = Math.min(420, ev.freq) + d; o.connect(g); o.start(t); o.stop(t + dur + 0.05); }
   }
 
-  /** TRANSMISSION — the scanned column sent as data: soft FSK in the low-mid range, low-passed. */
-  v_transmission(t, ev, out) {
-    const ctx = this.ctx, o = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
-    const f0 = 330, f1 = 495, baud = 0.028;
-    o.type = 'triangle';
-    ev.bits.forEach((b, k) => o.frequency.setValueAtTime(b ? f1 : f0, t + k * baud));
-    const dur = ev.bits.length * baud;
-    lp.type = 'lowpass'; lp.frequency.value = 900;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(ev.vel, t + 0.01);
-    g.gain.setValueAtTime(ev.vel, t + dur - 0.01); g.gain.linearRampToValueAtTime(0, t + dur);
-    o.connect(lp); lp.connect(g); g.connect(this.panner(ev.pan, out));
-    o.start(t); o.stop(t + dur + 0.02);
+  /** SCANNER — the read head: a few dry micro-ticks (impulse / noise tick), band-passed at the
+   *  column's brightness, sometimes bit-crushed. Fine, minimal, glitchy — no tone. */
+  v_scanner(t, ev, out, L) {
+    const ctx = this.ctx, bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = ev.freq; bp.Q.value = 1.4;
+    bp.connect(this.panner(ev.pan, ev.crush ? this.crush[L] : out));
+    for (let k = 0; k < ev.ticks; k++) {
+      const s = ctx.createBufferSource(), g = ctx.createGain();
+      s.buffer = this.clickBufs[k % 2]; g.gain.value = ev.vel * (1 - k * 0.18);
+      s.connect(g); g.connect(bp); s.start(t + k * ev.gap);
+    }
   }
 
   /** CRASH — the end: the image is consumed. Click cluster + crushed data slab + noise + a deep sub drop. */

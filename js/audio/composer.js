@@ -20,14 +20,14 @@
 //  data/transmission, glitch) — no pitched blips, no bright tones.
 // ─────────────────────────────────────────────────────────────
 import { makeRng, hashInts, euclid, clamp } from '../rng.js';
-import { GC } from '../map.js';
+import { GC, GR } from '../map.js';
 
 export const STEPS = 16;
-export const LAYERS = ['KICK', 'SUB', 'PULSE', 'HUM', 'RESONANCE', 'CLICK', 'NOISE', 'DATA', 'TRANSMISSION', 'GLITCH', 'TONE', 'CRASH'];
-const LAYER_OF = { kick: 'KICK', sub: 'SUB', pulse: 'PULSE', hum: 'HUM', res: 'RESONANCE', click: 'CLICK', noise: 'NOISE', data: 'DATA', transmission: 'TRANSMISSION', glitch: 'GLITCH', tone: 'TONE', crash: 'CRASH' };
+export const LAYERS = ['KICK', 'SUB', 'PULSE', 'HUM', 'RESONANCE', 'CLICK', 'NOISE', 'DATA', 'SCANNER', 'GLITCH', 'TONE', 'CRASH'];
+const LAYER_OF = { kick: 'KICK', sub: 'SUB', pulse: 'PULSE', hum: 'HUM', res: 'RESONANCE', click: 'CLICK', noise: 'NOISE', data: 'DATA', scanner: 'SCANNER', glitch: 'GLITCH', tone: 'TONE', crash: 'CRASH' };
 export const layerOf = (type) => LAYER_OF[type];
 export const MAX_LAYERS = 6;
-const PRIORITY = ['CRASH', 'SUB', 'KICK', 'GLITCH', 'CLICK', 'HUM', 'PULSE', 'TRANSMISSION', 'DATA', 'NOISE', 'RESONANCE', 'TONE'];
+const PRIORITY = ['CRASH', 'SUB', 'KICK', 'GLITCH', 'CLICK', 'HUM', 'PULSE', 'SCANNER', 'DATA', 'NOISE', 'RESONANCE', 'TONE'];
 
 // scan speed per section, in sweeps per bar (the first sweep maps the whole terrain)
 const ENERGY = { MAPPING: 0.15, LISTENING: 0.4, INTENSIFY: 0.9, CONSUMPTION: 0.35, END: 0 };
@@ -140,11 +140,14 @@ export class Composer {
       }
     }
 
-    // ── TRANSMISSION: while mapping, the scanned columns are transmitted as data ──
-    if ((name === 'MAPPING' && sb % 2 === 1) || (name === 'LISTENING' && sb % 6 === 3) || (name === 'CONSUMPTION' && sb % 5 === 2)) {
-      const c = cols[8];
-      const bits = []; for (let r = 0; r < M.grid.rows; r++) bits.push(M.grid.lum[r * GC + c.c] > c.hMean ? 1 : 0);
-      push(rng.int(2, 9), 'transmission', { bits, vel: 0.05, x: c.x, y: 0.5, pan: pan(c.x) * 0.6 });
+    // ── SCANNER: the read head ticks where the scan enters a new column (fine, dry, glitchy) ──
+    if (name === 'MAPPING' || (name === 'LISTENING' && sb % 4 === 1) || (name === 'CONSUMPTION' && sb % 5 === 2)) {
+      for (let i = 0; i < STEPS; i++) {
+        const c = cols[i];
+        if (c.c === prevCol(i).c || (name !== 'MAPPING' && i > 6)) continue;
+        const lum = M.grid.lum[Math.floor(c.yEdge * GR) * GC + c.c] || 0.5;
+        push(i + (rng() < 0.3 ? 0.5 : 0), 'scanner', { ticks: 1 + Math.round(clamp(c.eMax) * 3), gap: 0.004 + rng() * 0.005, freq: 1500 * Math.pow(2, lum * 2.2), vel: 0.07 + 0.08 * clamp(c.eMax), crush: rng() < 0.25, pan: pan(c.x) * 0.7, x: c.x, y: c.yEdge });
+      }
     }
 
     // ── CLICK / GLITCH: the hard edges the scan crosses ──

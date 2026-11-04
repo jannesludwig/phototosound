@@ -15,23 +15,24 @@ import { Terrain } from './terrain.js';
 import { EdgeFlash } from './edges.js';
 import { Orbit } from './orbit.js';
 import { Crumble } from './crumble.js';
-import { Slicing } from './slicing.js';
 import { heightAt } from '../map.js';
 
-export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'EDGE FLASH', 'ORBIT', 'CRUMBLE', 'SLICING', 'ANNOTATIONS', 'CRASH', 'HAND'];
+export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'EDGE FLASH', 'ORBIT', 'CRUMBLE', 'ANNOTATIONS', 'CRASH', 'HAND'];
 const TERRAIN_SHOW = { CONTOURS: 'Contours', WIREFRAME: 'Wire', RIDGES: 'Ridges', SCAN: 'Scan', FLARES: 'Flares', DECAY: 'Decay' };
-const LAYER_OBJ = { TERRAIN: 'terrain', 'EDGE FLASH': 'edges', ORBIT: 'orbit', CRUMBLE: 'crumble', SLICING: 'slicing' };
+const LAYER_OBJ = { TERRAIN: 'terrain', 'EDGE FLASH': 'edges', ORBIT: 'orbit', CRUMBLE: 'crumble' };
 
 const FOV = 30;
 const CAM_Z = 1 / Math.tan((FOV / 2) * Math.PI / 180);
 
+// the photograph before the map exists — already on the terrain's surface and pose, so the
+// hand-over to the terrain (which carries the photo ahead of the scan) is seamless
 const PHOTO_VERT = /* glsl */`
 varying vec2 vP;
-void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy * uHalf, 0.0, 1.0); }`;
+void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(mapPos(vP, terrainZ(vP)), 1.0); }`;
 const PHOTO_FRAG = /* glsl */`
 uniform float uIntro;
 varying vec2 vP;
-void main() { float a = uIntro * (1.0 - uForm); if (a < 0.02) discard; gl_FragColor = vec4(photo(vP), a); }`;
+void main() { float a = uIntro; if (a < 0.01) discard; gl_FragColor = vec4(photo(vP), a); }`;
 const FLASH_VERT = /* glsl */`void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const FLASH_FRAG = /* glsl */`uniform float uFull; void main() { if (uFull < 0.003) discard; gl_FragColor = vec4(1.0, 1.0, 1.0, uFull); }`;
 
@@ -76,7 +77,7 @@ export class Visuals {
     this.shared.uForm.value = 0; this.shared.uDecay.value = 0;
     this.obs.s = 0; this.obs.target = 0;
     this.photoMat = makeMaterial(this.shared, { vertex: PHOTO_VERT, fragment: PHOTO_FRAG, uniforms: { uIntro: { value: 0 } }, blending: THREE.NormalBlending });
-    this.photo = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.photoMat);
+    this.photo = new THREE.Mesh(new THREE.PlaneGeometry(2, 2, 96, 64), this.photoMat);
     this.photo.renderOrder = -1; this.photo.frustumCulled = false;
     this.scene.add(this.photo);
     this.crashFrame = 999;
@@ -91,7 +92,7 @@ export class Visuals {
     this.shared.uAmp.value = P.relief; this.shared.uTilt.value = P.tilt;
     this.baseYaw = P.yaw;
     const ctx = { shared: this.shared, analysis: this.analysis, map, st, quality: this.quality, view: this.view };
-    this.layers = { terrain: new Terrain(ctx), edges: new EdgeFlash(ctx), orbit: new Orbit(ctx), crumble: new Crumble(ctx), slicing: new Slicing(ctx) };
+    this.layers = { terrain: new Terrain(ctx), edges: new EdgeFlash(ctx), orbit: new Orbit(ctx), crumble: new Crumble(ctx) };
     for (const k in this.layers) { const l = this.layers[k]; l.setMix(0); l.resize(this.view); this.scene.add(l.group); }
     this.applyVisuals();
   }
@@ -173,8 +174,21 @@ export class Visuals {
   setUserYaw(rad) { this.userYaw = rad; }
 
   // ── input ───────────────────────────────────────────────────
+  /** The map point (analysis coords) under a screen point: coarse search over the posed terrain, then refine. */
+  pickMap(x, y) {
+    let best = [0.5, 0.5], bd = 1e9;
+    const test = (u, v) => { const [px, py, pz] = this.project(u, v); if (pz > 1) return; const d = (px - x) ** 2 + (py - y) ** 2; if (d < bd) { bd = d; best = [u, v]; } };
+    for (let j = 0; j <= 24; j++) for (let i = 0; i <= 36; i++) test(i / 36, j / 24);
+    for (let r = 0; r < 2; r++) { const [u0, v0] = best, s = r ? 1 / 288 : 1 / 72; for (let j = -4; j <= 4; j++) for (let i = -4; i <= 4; i++) test(Math.min(1, Math.max(0, u0 + i * s)), Math.min(1, Math.max(0, v0 + j * s))); }
+    return { x: best[0], y: best[1], px: Math.sqrt(bd) };
+  }
   observe(x, y, active) {
-    const [wx, wy] = this.screenToWorld(x, y);
+    let [wx, wy] = this.screenToWorld(x, y);
+    if (this.map && this.shared.uForm.value > 0.02 && (active || this.obs.s > 0.01)) {   // on the posed map: reveal where the finger is on the terrain
+      const m = this.pickMap(x, y); const [ix, iy] = toImg(m.x, m.y);
+      wx = ix * this.view.half.x; wy = iy * this.view.half.y;
+      if (m.px > 60) active = false;
+    }
     this.obs.x = wx; this.obs.y = wy; this.obs.target = active ? 1 : 0;
     if (!this.obs.init) { this.obs.sx = wx; this.obs.sy = wy; this.obs.init = true; }
   }
@@ -195,7 +209,7 @@ export class Visuals {
       case 'click': e.click = Math.max(e.click, ev.vel); break;
       case 'glitch': e.click = 1; e.noise = Math.max(e.noise, 0.7); break;
       case 'noise': e.noise = Math.max(e.noise, Math.min(1, ev.vel * 2.5)); break;
-      case 'data': case 'transmission': e.data = 1; break;
+      case 'data': e.data = 1; break;
       case 'crash': this.crashFrame = this.visOn('CRASH') ? 0 : 999; break;
     }
     const hAt = (x, y) => (this.map ? heightAt(this.map, x, y) : 0.5);
@@ -220,7 +234,8 @@ export class Visuals {
       o.s += (o.target - o.s) * Math.min(1, dt * (o.target > o.s ? 6 : 1.8));
       U.uObs.value.set(o.sx, o.sy, o.s);
     }
-    if (this.photoMat) this.photoMat.uniforms.uIntro.value = f.intro;
+    const tm = this.layers.terrain ? this.layers.terrain.mix : 0;
+    if (this.photoMat) this.photoMat.uniforms.uIntro.value = f.intro * (1 - tm);
     // the crash: the only full-screen flash — a few white frames, then black
     const cf = this.crashFrame++;
     const CRASH = [1, 1, 1, 1, 0.9, 0, 0.8, 0.6, 0, 0.45, 0.3, 0.2, 0.12, 0.06];
