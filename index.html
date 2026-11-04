@@ -20,9 +20,10 @@
     <label id="drop" for="file" tabindex="0">
       <span class="line">drop a photograph · or tap</span>
     </label>
-    <input id="file" type="file" accept="image/jpeg,image/png" hidden>
+    <input id="file" type="file" accept="image/jpeg,image/png,image/*">
     <nav id="demo"><span class="dim">demo</span> <button data-demo="0">i</button> <button data-demo="1">ii</button> <button data-demo="2">iii</button></nav>
     <p id="privacy">nothing leaves this page</p>
+    <p id="msg" hidden></p>
   </section>
 
   <!-- reading: what the machine sees -->
@@ -54,6 +55,40 @@
     <button id="b-rec" title="record a webm of picture and sound">rec</button>
   </div>
 
+  <!-- A classic script that always runs, even if the app module fails to load in this browser:
+       the browser must never navigate to a dropped file, and picked / dropped files are queued
+       until the app is ready (Safari/WebKit: empty MIME types are accepted by extension). -->
+  <script>
+    (function () {
+      var queue = window.__p2sQueue = [];
+      var input = document.getElementById('file');
+      function isImage(f) { return f && (/^image\//.test(f.type) || (!f.type && /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(f.name || ''))); }
+      function hand(f) { if (!isImage(f)) return; if (window.__p2sLoad) window.__p2sLoad(f); else queue.push(f); }
+      function cancel(e) { e.preventDefault(); if (e.dataTransfer) { try { e.dataTransfer.dropEffect = 'copy'; } catch (x) {} } }
+      ['dragenter', 'dragover'].forEach(function (t) {
+        window.addEventListener(t, function (e) { cancel(e); document.body.classList.add('dragging'); }, false);
+      });
+      window.addEventListener('dragleave', function (e) { if (!e.relatedTarget) document.body.classList.remove('dragging'); }, false);
+      window.addEventListener('drop', function (e) {
+        cancel(e); document.body.classList.remove('dragging');
+        var fs = (e.dataTransfer && e.dataTransfer.files) || [];
+        for (var i = 0; i < fs.length; i++) if (isImage(fs[i])) { hand(fs[i]); break; }
+      }, false);
+      function picked() {
+        var f = input.files && input.files[0];
+        if (!f) return;
+        hand(f);
+        setTimeout(function () { try { input.value = ''; } catch (x) {} }, 0);   // allow picking the same file again
+      }
+      input.addEventListener('change', picked, false);
+      // if the app has not started after 8 s, say so instead of failing silently
+      setTimeout(function () {
+        if (window.__p2sLoad) return;
+        var m = document.getElementById('msg'); m.hidden = false;
+        m.textContent = 'this browser could not start the piece (WebGL / JS modules). try a current Safari, Chrome or Firefox.';
+      }, 8000);
+    })();
+  </script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -33,6 +33,9 @@ body.dragging #drop { border-color: rgba(127, 230, 255, 0.35); background: rgba(
 #demo button:hover, #demo button:focus-visible { color: var(--fg); outline: none; }
 #privacy { position: absolute; top: calc(14vh - 24px); font-size: 9px; color: rgba(232, 238, 242, 0.1); }
 body:not(.state-landing) #landing { opacity: 0; pointer-events: none; }
+/* the file input stays in the document (not display:none — WebKit is happier), visually hidden */
+#file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+#msg { position: absolute; bottom: calc(14vh - 50px); max-width: 80vw; text-align: center; font-size: 9px; color: rgba(255, 140, 120, 0.7); }
 
 @keyframes blink { 50% { opacity: 0; } }
 

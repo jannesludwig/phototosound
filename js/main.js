@@ -58,38 +58,55 @@ resize();
 setTimeout(() => preloadFaceDetector(), 600);
 
 // ── input: file / drop / demo ──────────────────────────────
-$('file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); e.target.value = ''; });
+// Picking and dropping are caught by the classic script in index.html (it always runs, also
+// when this module is late); it hands files to __p2sLoad and queues them until we are ready.
 $('drop').addEventListener('click', () => audio.unlock());      // gesture → unlock audio early (iOS)
 $('drop').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
-addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('dragging'); });
-addEventListener('dragleave', (e) => { if (!e.relatedTarget) body.classList.remove('dragging'); });
-addEventListener('drop', (e) => {
-  e.preventDefault(); body.classList.remove('dragging');
-  const f = [...(e.dataTransfer?.files || [])].find((x) => /image\/(jpeg|png)/.test(x.type));
-  if (f) loadFile(f);
-});
+const demoBytes = (d) => new TextEncoder().encode('photo-to-sound/demo/' + d.name);
 document.querySelectorAll('#demo button').forEach((b) => b.addEventListener('click', () => {
   audio.unlock();
   const d = DEMOS[+b.dataset.demo];
   begin(d.make(), d.name, demoBytes(d));
 }));
-const demoBytes = (d) => new TextEncoder().encode('photo-to-sound/demo/' + d.name);
 
-async function loadFile(file) {
+function message(text) { const m = $('msg'); m.textContent = text || ''; m.hidden = !text; }
+
+/** Decode an image file robustly (Safari/WebKit: decode() can reject for large photos). */
+async function decodeFile(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* try the next way */ }
+    try { return await createImageBitmap(file); } catch (e) { /* try the next way */ }
+  }
   const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.src = url;
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  if (img.decode) { try { await img.decode(); return img; } catch (e) { /* fall back to onload */ } }
+  await new Promise((res, rej) => {
+    if (img.complete && img.naturalWidth) return res();
+    img.onload = res; img.onerror = () => rej(new Error('decode failed'));
+  });
+  return img;
+}
+async function fileBytes(file) {
+  if (file.arrayBuffer) return new Uint8Array(await file.arrayBuffer());
+  return new Promise((res) => { const r = new FileReader(); r.onload = () => res(new Uint8Array(r.result)); r.onerror = () => res(null); r.readAsArrayBuffer(file); });
+}
+async function loadFile(file) {
+  message('');
   try {
-    const img = new Image();
-    img.decoding = 'async';
-    img.src = url;
-    await img.decode();
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    begin(img, file.name.replace(/\.[^.]+$/, ''), bytes);
+    const [src, bytes] = await Promise.all([decodeFile(file), fileBytes(file).catch(() => null)]);
+    if (!(src.naturalWidth || src.width)) throw new Error('empty image');
+    begin(src, (file.name || 'photo').replace(/\.[^.]+$/, ''), bytes);
   } catch (e) {
     console.warn('could not read image', e);
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setState('landing');
+    message('could not read this image — try a JPG or PNG');
   }
 }
+// ready: take files from the classic script (and any that arrived before this module ran)
+window.__p2sLoad = (f) => loadFile(f);
+for (const f of (window.__p2sQueue || []).splice(0)) loadFile(f);
 
 // ── reading ────────────────────────────────────────────────
 async function begin(src, name, signatureBytes = null) {
