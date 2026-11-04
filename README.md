@@ -1,29 +1,21 @@
 # Photo to Sound
 
 A photograph becomes a **sound map**: a tilted terrain of thin lines on
-black. A scan line reads it once, and what it hears is recorded. Then the map
-**comes alive** as a technical, quantum-mechanical organism:
-
-- a heart beats at the photo's focal point
-- the other peaks pulse in their own periods
-- nerves grow from the heart and click when impulses arrive
-- waves interfere
-
-Finally the organism overloads and erodes, and the piece ends with one white
-flash, the crash. Every rhythm comes from the geometry of the image, and
-every sound lights up the place on the map that made it. The photo stays
-visible on the terrain, most clearly at the epicenter.
+black, with a scan line that crosses it and sonifies what lies beneath. Every
+sound lights up the place on the map that made it. The image is consumed over
+a slow, experimental piece of about 3 to 3.5 minutes. The piece ends with
+one white flash, the crash, then asks for a new image.
 
 References are Alva Noto, Ryoji Ikeda and Raster-Noton. The look is
-technical, organic, dark and minimal.
+technical and organic, like an alien organism made of technology.
 
 A hash of the file seeds every choice, so the same photo always produces the
 same piece. Everything runs in the browser and the photo is never uploaded.
 Only three.js, MediaPipe and the face model are downloaded from CDNs.
 
-See `docs/ROUND5.md` for the story and its timing, how each system is derived
-from the image, and every layer name. Earlier rounds are in `docs/ROUND4.md`,
-`docs/ROUND3.md` and `docs/V1_VS_V2.md`.
+**Round 4** replaced the six worlds with this single visual language. See
+`docs/ROUND4.md` for every sound and visual layer, the arc, and the tests.
+Earlier rounds are described in `docs/ROUND3.md` and `docs/V1_VS_V2.md`.
 
 ## Run
 
@@ -39,7 +31,7 @@ python3 -m http.server 8000
 | Link | What it does |
 |---|---|
 | `#demo=ii` | loads a demo image |
-| `#section=LIFE&at=20` | jumps to bar 20 of a section |
+| `#section=INTENSIFY&at=4` | jumps to bar 4 of a section |
 | `#bar=40` | jumps to a bar |
 | `#loop=1` | starts in loop mode |
 
@@ -47,53 +39,67 @@ python3 -m http.server 8000
 
 1. **Landing.** A black screen, one line, a near-invisible drop zone, and
    `demo i ii iii`.
-2. **Analysis.** The photo appears and is analysed. Readouts name the focal
-   point, the terrain and the sound map.
-3. **The piece**, about 3 to 3.5 minutes, runs once by default:
+2. **Reading.** The photo appears and is analysed. Small readouts name the
+   focal point, the terrain and the sound map.
+3. **The piece** runs once by default:
 
-| Phase | Sound | Image |
+| Section | Sound | Image |
 |---|---|---|
-| READING | sub, edge clicks, the read head's dry ticks (recorded) | the photo tilts back into 3D and morphs into contour lines behind the scan |
-| AWAKENING | near silence, then the first heartbeat | the heart's rings appear at the epicenter |
-| LIFE | heart, nerves, peaks, interference, memory, kicks; erosion late. Layers enter one by one, at most ~6 | waves, growing circuit traces with impulses, pulsing peaks; the photo held at the epicenter; 2 superpositions |
-| DECAY | the heart stumbles, peaks sleep, the rhythm fragments, one low tone, erosion ticks | an erosion front eats inward; nerves die from the leaves; the core goes last |
-| END | the crash | the only full-screen white flash, then back to the upload screen |
+| MAPPING | no beat: sub, sparse clicks, the scanned columns transmitted as data | the photo folds into a terrain; the first sweep maps it |
+| LISTENING | slow: hum, valley resonances, rare kicks on ridges | contours; the orbit breathes at the focal point |
+| INTENSIFY | denser: irregular kicks, sub pulses, glitches; phrases without a beat | fine contours, wire flashes, local flares, rare slicing |
+| CONSUMPTION | the beat leaves, one low tone, the sub glides down | lines break, the border crumbles, colour drains |
+| END | the crash, then nothing | the only full-screen white flash |
 
-The **loop** toggle at the bottom plays the piece again instead of asking for
-a new image.
+After the crash the landing returns and asks for a new image. The **loop**
+toggle at the bottom plays the piece again instead.
 
 **The hand.**
 
-- The slider on the right edge rotates the map, and so does click-dragging.
-- The cursor bends the terrain as a force field.
+- The slider on the right edge rotates the map. Click-dragging on the map
+  rotates it too.
+- Moving the cursor bends the terrain as a force field, which springs back.
 - Crossing a strong edge makes a click.
-- A still press reveals the photo on the terrain under the finger.
+- A still press reveals the original photo under the finger.
 
 **Controls** appear on hover or tap: pause, new, volume, rec (WebM) and loop.
 
-**M opens the mixer:**
+**M opens the mixer:** every sound and visual layer, with mute, solo, live
+meters and a **copy settings** button.
 
-- **systems**: one switch per system (HEARTBEAT, POLYRHYTHM, INTERFERENCE,
-  NERVOUS SYSTEM, MEMORY, EROSION, SUPERPOSITION, PHOTO ON MAP)
-- every **sound** and **visual** layer, with mute, solo and meters
-- **copy settings**
+## Image → map → sound
 
-## Image → organism → sound
-
-| From the image | System | Sound |
+| Image | Map | Sound when the scan line crosses it |
 |---|---|---|
-| focal point (eye, light, most salient place) | the heart, the epicenter | HEART: sub lub-dub; waves run out |
-| other summits (height → period, position → phase) | peaks, a polyrhythm in a 2-bar cycle | PEAKS: low sine knocks |
-| hard edges, ridges, rough places, linked from the heart | the nervous system (circuit traces) | NERVES: clicks / noise grains when impulses arrive; path length = timing |
-| where two waves meet | interference | INTERFERENCE: crushed click doublet + noise slab |
-| what the scan heard while reading | memory | MEMORY: re-sequenced, crushed fragments |
-| steepest descent from peaks into valleys | erosion | EROSION: fine ticks on arrival |
-| brightness | tempo (100–114 BPM) and root | — |
+| hard edges | ridges | CLICK; the hardest give a GLITCH |
+| bright, high ground | high ridges | KICK (rare and irregular, never 4/4) |
+| rough texture | rough ground | NOISE bursts; particles break off the border |
+| dark, flat areas | valleys | space, RESONANCE |
+| eye, light or most salient point | the focal summit | a SUB swell; the orbit rings breathe |
+| each column | the scanned column | TRANSMISSION (rows as bits), DATA |
+
+**Per-photo parameters:**
+
+| Image feature | Sets |
+|---|---|
+| contrast | relief, kick decay |
+| tonal range | number of contour levels |
+| brightness | tempo (100–114 BPM) and root |
+| edge density | click density, section lengths |
+| graphic or flat images | terraced into plateaus, and keep more wireframe |
+
+**Sound layers:** KICK, SUB, PULSE, HUM, RESONANCE, CLICK, NOISE, DATA,
+TRANSMISSION, GLITCH, TONE, CRASH. There is a soft budget of 6 sounding at
+once.
+
+**Visual layers:** TERRAIN, CONTOURS, WIREFRAME, RIDGES, SCAN, FLARES,
+DEFORM, DECAY, EDGE FLASH, ORBIT, CRUMBLE, SLICING, ANNOTATIONS, CRASH,
+HAND.
 
 **Timing.**
 
-- A worker clock schedules 150 ms ahead from integer step indices, with
-  micro-timing from the geometry.
+- A worker clock schedules 150 ms ahead from integer step indices, so nothing
+  drifts.
 - Every scheduled sound also goes to a queue that the visuals read against
   the same audio clock (one event → one place on the map).
 
@@ -102,24 +108,22 @@ a new image.
 ```
 index.html              page, import map, always-on upload/drop script (Safari fix)
 css/style.css           gallery black, hairlines, monospace; yaw slider; mixer
-js/main.js              flow, UI, annotations overlay, the hand, rotation, mixer (systems)
+js/main.js              flow, UI, annotations overlay, the hand, rotation, mixer
 js/analysis.js          features, grid, palette, signature
 js/structures.js        edge strokes, iso-contours, straight segments
 js/face.js              MediaPipe face detection (box + eye keypoints)
 js/map.js               the sound map: height, ridges, texture, focal point, params
-js/organism.js          heart, peaks, nerve tree, erosion streams — derived from the map
-js/audio/composer.js    the story (READING → AWAKENING → LIFE → DECAY → END), all systems
+js/audio/composer.js    the arc, the scan, map → events, silence, layer budget
 js/audio/engine.js      voices, per-layer buses, scheduler, limiter, one-shot/loop
-js/visuals/engine.js    renderer, photo → terrain, projection, phase mix, layer toggles, crash
-js/visuals/terrain.js   terrain, photo core/pixels/reveal, waves, interference, flares, superposition
-js/visuals/orbit.js     HEART rings and PEAKS markers
-js/visuals/nerves.js    NERVES: circuit traces and impulses
-js/visuals/erosion.js   EROSION: light draining downhill
+js/visuals/engine.js    renderer, photo → terrain, projection, layer toggles, crash flash
+js/visuals/terrain.js   the terrain: contours, wire, ridges, scan, flares, deform, decay
 js/visuals/edges.js     EDGE FLASH
-js/visuals/crumble.js   CRUMBLE: border particles in decay
+js/visuals/orbit.js     ORBIT around the focal point
+js/visuals/crumble.js   CRUMBLE: border particles
+js/visuals/slicing.js   SLICING: rare quantum slices
 js/visuals/field.js     the hand's force field
 js/visuals/common.js    shared GLSL (terrain height + pose), layer base
 js/demo.js              three procedural demo images
 Test_Images/            test photos
-docs/                   ROUND5 (current), ROUND4, ROUND3, V1_VS_V2, TEST (round 3), research
+docs/                   ROUND4 (current), ROUND3, V1_VS_V2, TEST (round 3), research
 ```
