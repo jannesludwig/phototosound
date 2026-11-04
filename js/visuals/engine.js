@@ -31,7 +31,7 @@ void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix
 const PHOTO_FRAG = /* glsl */`
 uniform float uIntro;
 varying vec2 vP;
-void main() { float a = uIntro * (1.0 - uForm); if (a < 0.006) discard; gl_FragColor = vec4(photo(vP), a); }`;
+void main() { float a = uIntro * (1.0 - uForm); if (a < 0.02) discard; gl_FragColor = vec4(photo(vP), a); }`;
 const FLASH_VERT = /* glsl */`void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const FLASH_FRAG = /* glsl */`uniform float uFull; void main() { if (uFull < 0.003) discard; gl_FragColor = vec4(1.0, 1.0, 1.0, uFull); }`;
 
@@ -228,7 +228,7 @@ export class Visuals {
 
     if (st && this.map) {
       U.uForm.value += (st.form - U.uForm.value) * Math.min(1, dt * 1.5);
-      if (Math.abs(st.form - U.uForm.value) < 0.003) U.uForm.value = st.form;
+      if (Math.abs(st.form - U.uForm.value) < 0.015) U.uForm.value = st.form;
       U.uEnergy.value = st.energy; U.uDecay.value = this.visOn('DECAY') ? st.decay : 0;
       U.uYaw.value = this.baseYaw + this.userYaw + Math.sin(this.time * 0.02) * 0.04;
       const s = { ...st, dt, t: this.time, kick: e.kick, click: e.click, noise: e.noise, low: e.low };
