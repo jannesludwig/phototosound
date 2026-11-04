@@ -62,12 +62,6 @@ body.state-reading .corner, body.state-playing .corner { opacity: 1; }
 .tr { top: max(16px, env(safe-area-inset-top)); right: 18px; text-align: right; }
 .bl { bottom: max(16px, env(safe-area-inset-bottom)); left: 18px; }
 .br { bottom: max(16px, env(safe-area-inset-bottom)); right: 18px; text-align: right; }
-#r-world { color: var(--dim); padding: 0; text-align: right; }
-#r-world:hover { color: var(--fg); }
-#worlds { list-style: none; position: absolute; right: 0; bottom: 100%; margin-bottom: 8px; text-align: right; }
-#worlds li button { padding: 2px 0; color: var(--faint); }
-#worlds li button:hover, #worlds li button.on { color: var(--fg); }
-#worlds li button.on::before { content: "· "; color: var(--accent); }
 
 /* ── controls ────────────────────────────────────────── */
 #controls {
@@ -107,8 +101,12 @@ body.state-playing.ui #controls { opacity: 1; pointer-events: auto; }
   font-size: 9px; color: var(--dim); font-variant-numeric: tabular-nums;
 }
 #mixer[hidden] { display: none; }
-.mx-head, .mx-foot { display: flex; justify-content: space-between; color: var(--faint); margin-bottom: 6px; }
-.mx-foot { margin: 6px 0 0; }
+.mx-head, .mx-foot { display: flex; justify-content: space-between; align-items: center; color: var(--faint); margin-bottom: 6px; }
+.mx-sub { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(232, 238, 242, 0.1); }
+.mx-foot { margin: 8px 0 0; }
+#mx-copy { color: var(--dim); border: 1px solid rgba(232, 238, 242, 0.2); padding: 2px 6px; font-size: 8px; }
+#mx-copy:hover { color: var(--fg); }
+#mixer { max-height: 92vh; overflow-y: auto; }
 .mx-row { display: grid; grid-template-columns: 9px 50px 1fr 60px 18px 18px; align-items: center; gap: 6px; padding: 3px 0; }
 .mx-row.off { opacity: 0.35; }
 .mx-dot { width: 5px; height: 5px; background: rgba(232, 238, 242, 0.15); }
@@ -121,3 +119,14 @@ body.state-playing.ui #controls { opacity: 1; pointer-events: auto; }
 .mx-row button.on { color: #000; background: var(--fg); }
 #r-title { cursor: default; }
 @media (max-width: 640px) { #mixer { left: 8px; right: 8px; width: auto; } }
+
+/* ── map rotation slider (right edge) ────────────────── */
+#yaw { position: fixed; right: 14px; top: 50%; transform: translateY(-50%); width: 18px; height: 34vh; cursor: ns-resize; opacity: 0; transition: opacity 0.8s; touch-action: none; }
+body.state-playing #yaw { opacity: 0.35; }
+body.state-playing #yaw:hover, #yaw.drag { opacity: 0.9; }
+#yaw-track { position: absolute; left: 8px; top: 0; bottom: 0; width: 1px; background: rgba(232, 238, 242, 0.35); }
+#yaw-knob { position: absolute; left: 5px; width: 7px; height: 7px; background: var(--fg); top: 50%; margin-top: -3px; }
+#yaw-label { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 8px; color: var(--dim); white-space: nowrap; }
+#b-loop.on { color: var(--fg); }
+#msg.info { color: var(--dim); }
+@media (max-width: 640px) { #yaw { right: 6px; height: 28vh; } }

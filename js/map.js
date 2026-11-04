@@ -33,10 +33,10 @@ export function buildMap(analysis) {
   const base = blur(L, w, h, 3, 2);
   let gmax = 1e-6; for (let i = 0; i < N; i++) gmax = Math.max(gmax, Gm[i]);
   const edgeN = new Float32Array(N); for (let i = 0; i < N; i++) edgeN[i] = Math.min(1, Gm[i] / (gmax * 0.5));
-  const ridges = blur(edgeN, w, h, 1, 1);
+  const ridges = blur(edgeN, w, h, 2, 1);
   const texture = blur(edgeN, w, h, 4, 1);
   const H = new Float32Array(N);
-  for (let i = 0; i < N; i++) H[i] = base[i] * (1 - ridged * 0.5) + ridges[i] * ridged * 0.5;
+  for (let i = 0; i < N; i++) H[i] = base[i] * (1 - ridged * 0.35) + ridges[i] * ridged * 0.35;
   // normalise by percentiles (every photo gets a full relief, shaped its own way)
   const sorted = Float32Array.from(H).sort();
   const lo = sorted[Math.floor(N * 0.02)], hi = sorted[Math.floor(N * 0.98)] + 1e-6;
@@ -122,10 +122,10 @@ export function buildMap(analysis) {
   const params = {
     bpm, root, accent: rng.pick(ACCENTS), speed: rng.range(0.75, 1.3), density: rng.range(0.85, 1.15),
     levels: Math.round(10 + f.tonalRange * 16 + rng() * 8),             // contour density
-    relief: clamp(0.28 + f.contrast * 0.9 + ridged * 0.2, 0.25, 0.7),    // height amplitude
-    tilt: rng.range(0.85, 1.08),
+    relief: clamp(0.13 + f.contrast * 0.45 + ridged * 0.08, 0.14, 0.34),  // height amplitude
+    tilt: rng.range(0.72, 0.92),
     yaw: rng.range(-0.25, 0.25),
-    grid: Math.round(24 + rng() * 26),                                   // wireframe density
+    grid: Math.round(22 + rng() * 20),                                   // wireframe density
     ridged, terraced, smooth, steps,
     kickDecay: lerp(0.9, 0.35, ridged),
     swing: clamp(f.flow * 0.12, 0, 0.1),

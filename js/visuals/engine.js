@@ -1,153 +1,125 @@
 // ─────────────────────────────────────────────────────────────
-//  visuals/engine.js — three.js renderer, the photo plane (what the
-//  observer collapses back to), and the blend of primary/secondary
-//  worlds. Audio events arrive as envelopes + sparks.
+//  visuals/engine.js — renderer and orchestration of the sound map.
+//
+//  One visual language: the terrain (terrain.js) with light add-ons —
+//  edge flashes, the focal orbit, the crumbling border, rare quantum
+//  slicing. Every sound event is dispatched to the layers with its
+//  position (and the height of the map there), so it has a visible
+//  consequence at a specific place. The only full-screen flash is the
+//  crash at the very end. Each layer can be switched off in the mixer.
 // ─────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { makeSharedUniforms, makeMaterial, toImg } from './common.js';
-import { Dissolution } from './dissolution.js';
-import { Raster } from './raster.js';
-import { Orbit } from './orbit.js';
-import { Topography } from './topography.js';
-import { Flow } from './flow.js';
-import { MatrixWorld } from './matrix.js';
-import { Quanta } from './quanta.js';
 import { ForceField } from './field.js';
+import { Terrain } from './terrain.js';
+import { EdgeFlash } from './edges.js';
+import { Orbit } from './orbit.js';
+import { Crumble } from './crumble.js';
+import { Slicing } from './slicing.js';
+import { heightAt } from '../map.js';
 
-const WORLD_CLASSES = { DISSOLUTION: Dissolution, RASTER: Raster, ORBIT: Orbit, TOPOGRAPHY: Topography, FLOW: Flow, MATRIX: MatrixWorld };
+export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'EDGE FLASH', 'ORBIT', 'CRUMBLE', 'SLICING', 'ANNOTATIONS', 'CRASH', 'HAND'];
+const TERRAIN_SHOW = { CONTOURS: 'Contours', WIREFRAME: 'Wire', RIDGES: 'Ridges', SCAN: 'Scan', FLARES: 'Flares', DECAY: 'Decay' };
+const LAYER_OBJ = { TERRAIN: 'terrain', 'EDGE FLASH': 'edges', ORBIT: 'orbit', CRUMBLE: 'crumble', SLICING: 'slicing' };
 
 const FOV = 30;
-const CAM_Z = 1 / Math.tan((FOV / 2) * Math.PI / 180); // z=0 plane spans y ∈ [-1, 1]
-
-// white glitch flash: full white, or Ikeda-style white bands across the screen
-const FLASH_VERT = /* glsl */`
-varying vec2 vUv;
-void main() { vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
-const FLASH_FRAG = /* glsl */`
-uniform float uFull, uBands, uSeed;
-varying vec2 vUv;
-float h(float p) { p = fract(p * .1031); p *= p + 33.33; p *= p + p; return fract(p); }
-void main() {
-  float row = floor(vUv.y * 140.0);
-  float grp = floor(row / (1.0 + floor(h(uSeed * 3.1) * 6.0)));            // bands of varied height
-  float band = step(0.86, h(grp * 1.37 + uSeed * 17.0));
-  float a = max(uFull, band * uBands);
-  if (a < 0.003) discard;
-  gl_FragColor = vec4(1.0, 1.0, 1.0, a);
-}`;
+const CAM_Z = 1 / Math.tan((FOV / 2) * Math.PI / 180);
 
 const PHOTO_VERT = /* glsl */`
 varying vec2 vP;
-void main() {
-  vP = position.xy;                        // plane is 2×2 → image space
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy * uHalf, 0.0, 1.0);
-}`;
+void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy * uHalf, 0.0, 1.0); }`;
 const PHOTO_FRAG = /* glsl */`
-uniform float uIntro;  // fade-in of the photo when it first appears
+uniform float uIntro;
 varying vec2 vP;
-void main() {
-  float c = coherence(vP) * uIntro;
-  vec3 col = photo(vP);
-  // the observed area is very slightly over-exposed at its rim
-  float rim = c * (1.0 - c) * 0.5;
-  gl_FragColor = vec4(col + rim * 0.25, c);
-}`;
+void main() { float a = uIntro * (1.0 - uForm); if (a < 0.006) discard; gl_FragColor = vec4(photo(vP), a); }`;
+const FLASH_VERT = /* glsl */`void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const FLASH_FRAG = /* glsl */`uniform float uFull; void main() { if (uFull < 0.003) discard; gl_FragColor = vec4(1.0, 1.0, 1.0, uFull); }`;
 
 export class Visuals {
   constructor(canvas, quality) {
     this.canvas = canvas;
     this.quality = quality;
-    const renderer = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !quality.mobile, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+    const renderer = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !quality.mobile, alpha: false, powerPreference: 'high-performance' });
     renderer.setClearColor(0x000000, 1);
-    renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // colours pass through untouched
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.05, 20);
     this.camera.position.set(0, 0, CAM_Z);
     this.shared = makeSharedUniforms();
-    this.worlds = {};
-    this.mix = { primary: 0, secondary: 0 };
-    this.view = { half: new THREE.Vector2(1, 1), bufferHeight: 1, aspect: 1 };
-    this.time = 0;
-    this.env = { kick: 0, click: 0, sine: 0, noise: 0 };
-    this.sparkIdx = 0;
-    this.beat = 0;
-    this.obs = { x: 0, y: 0, s: 0, target: 0 };
-    this.dprScale = 1;           // lowered automatically if frames are slow
-    this.slow = 0; this.dtAvg = 1 / 60;
-    // the hand's force field (shared by every world)
     this.field = new ForceField();
     this.shared.uField.value = this.field.tex;
     this.shared.uFieldRect.value = this.field.rect;
-    // white glitch flash overlay
-    this.flashMat = new THREE.ShaderMaterial({ vertexShader: FLASH_VERT, fragmentShader: FLASH_FRAG, uniforms: { uFull: { value: 0 }, uBands: { value: 0 }, uSeed: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false });
+    this.view = { half: new THREE.Vector2(1, 1), bufferHeight: 1, aspect: 1 };
+    this.time = 0;
+    this.env = { kick: 0, click: 0, noise: 0, data: 0, low: 0 };
+    this.ripIdx = 0;
+    this.obs = { x: 0, y: 0, s: 0, target: 0 };
+    this.userYaw = 0;
+    this.vis = Object.fromEntries(VISUAL_LAYERS.map((n) => [n, { mute: false, solo: false }]));
+    this.dprScale = 1; this.slow = 0; this.dtAvg = 1 / 60;
+    this.flashMat = new THREE.ShaderMaterial({ vertexShader: FLASH_VERT, fragmentShader: FLASH_FRAG, uniforms: { uFull: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false });
     const fq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.flashMat); fq.frustumCulled = false; fq.renderOrder = 20;
     this.scene.add(fq);
-    this.flash = { t0: -99, frame: 99, kind: null, seed: 0 };
+    this.crashFrame = 999;
+    this.layers = {};
     this.resize();
   }
 
-  /** New photograph (shown sharp while it is read). `texCanvas` is a ≤2048px canvas of the photo. */
+  // ── photo + map ─────────────────────────────────────────────
   setPhoto(analysis, texCanvas) {
     this.clearPhoto();
     this.analysis = analysis;
     this.imgAspect = texCanvas.width / texCanvas.height;
     const tex = this.texture = new THREE.CanvasTexture(texCanvas);
-    tex.colorSpace = THREE.NoColorSpace;
-    tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
-    tex.anisotropy = 4;
+    tex.colorSpace = THREE.NoColorSpace; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
     this.shared.uImage.value = tex;
-    this.shared.uForm.value = 0; this.shared.uCohere.value = 0;
+    this.shared.uForm.value = 0; this.shared.uDecay.value = 0;
     this.obs.s = 0; this.obs.target = 0;
-
     this.photoMat = makeMaterial(this.shared, { vertex: PHOTO_VERT, fragment: PHOTO_FRAG, uniforms: { uIntro: { value: 0 } }, blending: THREE.NormalBlending });
     this.photo = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.photoMat);
-    this.photo.renderOrder = -1;
-    this.photo.frustumCulled = false;
+    this.photo.renderOrder = -1; this.photo.frustumCulled = false;
     this.scene.add(this.photo);
+    this.crashFrame = 999;
     this.resize();
   }
 
-  /** After reading: build the worlds this photograph chose (+ its quanta from the structures). */
-  beginWorlds(params, choice, st) {
-    this.params = params;
-    if (st) {
-      this.quanta = new Quanta({ shared: this.shared, analysis: this.analysis, params, quality: this.quality, st, view: this.view });
-      this.quanta.setMix(0);
-      this.scene.add(this.quanta.group);
-    }
-    this.shared.uAccent.value.setRGB(...params.accent);
-    this.shared.uSpeed.value = params.speed;
-    this.setWorlds(choice.primary, choice.secondary, choice.accent);
+  /** The analysis is done: build the sound map's layers. */
+  beginMap(map, st) {
+    this.map = map;
+    const P = map.params;
+    this.shared.uAccent.value.setRGB(...P.accent);
+    this.shared.uAmp.value = P.relief; this.shared.uTilt.value = P.tilt;
+    this.baseYaw = P.yaw;
+    const ctx = { shared: this.shared, analysis: this.analysis, map, st, quality: this.quality, view: this.view };
+    this.layers = { terrain: new Terrain(ctx), edges: new EdgeFlash(ctx), orbit: new Orbit(ctx), crumble: new Crumble(ctx), slicing: new Slicing(ctx) };
+    for (const k in this.layers) { const l = this.layers[k]; l.setMix(0); l.resize(this.view); this.scene.add(l.group); }
+    this.applyVisuals();
   }
 
   clearPhoto() {
-    for (const k in this.worlds) { this.scene.remove(this.worlds[k].group); this.worlds[k].dispose(); }
-    this.worlds = {};
+    for (const k in this.layers) { this.scene.remove(this.layers[k].group); this.layers[k].dispose(); }
+    this.layers = {}; this.map = null;
     if (this.photo) { this.scene.remove(this.photo); this.photo.geometry.dispose(); this.photoMat.dispose(); this.photo = null; }
-    if (this.quanta) { this.scene.remove(this.quanta.group); this.quanta.dispose(); this.quanta = null; }
     if (this.texture) { this.texture.dispose(); this.texture = null; }
   }
 
-  /** Instantiate worlds lazily; keep at most the two in use (+ the outgoing one while it fades). */
-  ensureWorld(name) {
-    if (!this.worlds[name]) {
-      const ctx = { shared: this.shared, analysis: this.analysis, params: this.params, quality: this.quality, camZ: CAM_Z, renderer: this.renderer };
-      const w = new WORLD_CLASSES[name](ctx);
-      w.name = name;
-      w.setMix(0);
-      w.resize(this.view);
-      this.worlds[name] = w;
-      this.scene.add(w.group);
-    }
-    return this.worlds[name];
+  // ── visual mixer ────────────────────────────────────────────
+  setVisual(name, key, on) { this.vis[name][key] = on; this.applyVisuals(); }
+  visOn(name) {
+    const anySolo = VISUAL_LAYERS.some((n) => this.vis[n].solo);
+    const v = this.vis[name];
+    // terrain sub-features count as soloed when TERRAIN is soloed (and vice versa)
+    if (anySolo) return !v.mute && (v.solo || (TERRAIN_SHOW[name] && this.vis.TERRAIN.solo) || (name === 'TERRAIN' && Object.keys(TERRAIN_SHOW).some((n) => this.vis[n].solo)));
+    return !v.mute;
+  }
+  applyVisuals() {
+    const T = this.layers.terrain;
+    if (T) for (const [n, k] of Object.entries(TERRAIN_SHOW)) T.setShow(k, this.visOn(n));
+    for (const [n, k] of Object.entries(LAYER_OBJ)) if (this.layers[k]) this.layers[k].on = this.visOn(n);
+    this.shared.uDeformOn.value = this.visOn('DEFORM') ? 1 : 0;
   }
 
-  setWorlds(primary, secondary, accent) {
-    this.primary = primary; this.secondary = secondary; this.accent = accent;
-    this.ensureWorld(primary); this.ensureWorld(secondary);
-    // drop worlds that are neither (after they have faded — handled in frame())
-  }
-
+  // ── view ────────────────────────────────────────────────────
   resize() {
     const dpr = Math.max(0.75, Math.min(window.devicePixelRatio || 1, this.quality.mobile ? 1.5 : 2) * this.dprScale);
     const W = window.innerWidth, H = window.innerHeight;
@@ -156,142 +128,118 @@ export class Visuals {
     this.canvas.style.width = W + 'px'; this.canvas.style.height = H + 'px';
     const aspect = W / H;
     this.camera.aspect = aspect; this.camera.updateProjectionMatrix();
-    // fit the image inside the view with a generous black margin
     const ia = this.imgAspect || 1.5;
-    const maxW = aspect * (W < 700 ? 0.92 : 0.74), maxH = W < 700 ? 0.78 : 0.74;
+    const maxW = aspect * (W < 700 ? 0.88 : 0.64), maxH = W < 700 ? 0.7 : 0.66;
     let hx = maxW, hy = hx / ia;
     if (hy > maxH) { hy = maxH; hx = hy * ia; }
     this.view.half.set(hx, hy);
-    this.view.aspect = aspect;
-    this.view.bufferHeight = H * dpr;
-    this.view.cssW = W; this.view.cssH = H;
-    this.shared.uHalf.value.set(hx, hy);
-    this.shared.uView.value.set(aspect, 1);
+    this.view.aspect = aspect; this.view.bufferHeight = H * dpr; this.view.cssW = W; this.view.cssH = H;
+    this.shared.uHalf.value.set(hx, hy); this.shared.uView.value.set(aspect, 1);
     this.shared.uPx.value = 2 / (H * dpr);
-    this.shared.uObsR.value = W < 700 ? 0.42 : 0.32;
-    if (this.field) this.field.setView(aspect);
-    for (const k in this.worlds) this.worlds[k].resize(this.view);
+    this.shared.uObsR.value = W < 700 ? 0.4 : 0.3;
+    this.field.setView(aspect);
+    for (const k in this.layers) this.layers[k].resize(this.view);
   }
-
-  /** Keep ~60 fps: if frames stay slow for ~2 s, render at a lower resolution. */
   adapt(dt) {
-    if (!this.photo || dt > 0.25) return;                // ignore tab switches
+    if (!this.photo || dt > 0.25) return;
     this.dtAvg += (dt - this.dtAvg) * 0.05;
     this.slow = this.dtAvg > 1 / 42 ? this.slow + 1 : Math.max(0, this.slow - 2);
-    if (this.slow > 120 && this.dprScale > 0.5) {
-      this.dprScale *= 0.8; this.slow = 0; this.dtAvg = 1 / 60;
-      this.resize();
-    }
+    if (this.slow > 120 && this.dprScale > 0.5) { this.dprScale *= 0.8; this.slow = 0; this.dtAvg = 1 / 60; this.resize(); }
   }
 
-  /** CSS pixel → world coords on the z=0 plane. */
-  screenToWorld(x, y) {
-    return [(x / this.view.cssW * 2 - 1) * this.view.aspect, -(y / this.view.cssH * 2 - 1)];
-  }
-  /** Image analysis coords (0..1, y down) → CSS pixels. */
+  screenToWorld(x, y) { return [(x / this.view.cssW * 2 - 1) * this.view.aspect, -(y / this.view.cssH * 2 - 1)]; }
+  screenToImage(x, y) { const [wx, wy] = this.screenToWorld(x, y); return [(wx / this.view.half.x + 1) / 2, (1 - wy / this.view.half.y) / 2]; }
   imageToScreen(x, y) {
     const [ix, iy] = toImg(x, y);
-    const wx = ix * this.view.half.x, wy = iy * this.view.half.y;
-    return [(wx / this.view.aspect + 1) / 2 * this.view.cssW, (1 - wy) / 2 * this.view.cssH];
+    return [(ix * this.view.half.x / this.view.aspect + 1) / 2 * this.view.cssW, (1 - iy * this.view.half.y) / 2 * this.view.cssH];
   }
-  /** Image rect in CSS px. */
-  imageRect() {
-    const [x0, y0] = this.imageToScreen(0, 0), [x1, y1] = this.imageToScreen(1, 1);
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  imageRect() { const [x0, y0] = this.imageToScreen(0, 0), [x1, y1] = this.imageToScreen(1, 1); return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; }
+
+  /** A point of the map (analysis coords) → CSS px, with the same pose as the shaders. */
+  project(x, y, lift = 0) {
+    const U = this.shared, form = U.uForm.value;
+    const [ix, iy] = toImg(x, y);
+    const h = this.map ? heightAt(this.map, x, y) : 0;
+    const z = ((h - 0.45) * U.uAmp.value * (0.8 + 0.45 * U.uLow.value) * form) + lift;
+    let px = ix * this.view.half.x, py = iy * this.view.half.y;
+    const yaw = U.uYaw.value * form, c = Math.cos(yaw), s = Math.sin(yaw);
+    [px, py] = [c * px - s * py, s * px + c * py];
+    const t = -U.uTilt.value * form;
+    const v = new THREE.Vector3(px, py * Math.cos(t) - z * Math.sin(t) - 0.1 * U.uTilt.value * form, py * Math.sin(t) + z * Math.cos(t));
+    v.project(this.camera);
+    return [(v.x + 1) / 2 * this.view.cssW, (1 - v.y) / 2 * this.view.cssH, v.z];
   }
 
-  /** Observer input: active=true while pointer moves/touches. */
+  setUserYaw(rad) { this.userYaw = rad; }
+
+  // ── input ───────────────────────────────────────────────────
   observe(x, y, active) {
     const [wx, wy] = this.screenToWorld(x, y);
     this.obs.x = wx; this.obs.y = wy; this.obs.target = active ? 1 : 0;
     if (!this.obs.init) { this.obs.sx = wx; this.obs.sy = wy; this.obs.init = true; }
   }
-
-  /** The cursor cut through the piece from (x0,y0) to (x1,y1) (CSS px) during dt. */
   force(x0, y0, x1, y1, dt) {
+    if (!this.visOn('HAND')) return;
     const [a, b] = this.screenToWorld(x0, y0), [c, d] = this.screenToWorld(x1, y1);
     this.field.inject(a, b, c, d, dt, this.view.cssW < 700 ? 0.22 : 0.16);
   }
-  screenToImage(x, y) {
-    const [wx, wy] = this.screenToWorld(x, y);
-    return [(wx / this.view.half.x + 1) / 2, (1 - wy / this.view.half.y) / 2];
-  }
 
-  /** Audio event → envelopes, white flashes, tunneling jumps, a spark at its source pixel. */
+  // ── sound → light ───────────────────────────────────────────
   trigger(ev) {
     const e = this.env;
     switch (ev.type) {
-      case 'kick': e.kick = Math.max(e.kick, ev.vel); if (!ev.ghost) this.beat++; break;
-      case 'click': e.click = Math.max(e.click, ev.vel); break;
-      case 'pulse': case 'tone': e.sine = Math.max(e.sine, 0.5); break;
-      case 'noise': e.noise = Math.max(e.noise, Math.min(1, ev.vel * 2.2)); break;
-      case 'data': e.noise = Math.max(e.noise, 0.6); e.click = Math.max(e.click, 0.7); this.shared.uJump.value++; break;
-      case 'glitch':
-        e.click = 1; e.noise = Math.max(e.noise, 0.8); this.shared.uJump.value++;
-        // one glitch sound → one white flash (full white on accents, white bands otherwise)
-        this.flash = { t0: this.time, frame: 0, kind: ev.big ? 'big' : ev.vel >= 0.85 ? 'full' : 'bands', seed: Math.random() * 100 };
+      case 'kick':
+        e.kick = Math.max(e.kick, ev.vel);
+        if (ev.x !== undefined) { const [ix, iy] = toImg(ev.x, ev.y); this.shared.uRip.value[this.ripIdx++ % 6].set(ix, iy, this.time, ev.vel); }
         break;
+      case 'click': e.click = Math.max(e.click, ev.vel); break;
+      case 'glitch': e.click = 1; e.noise = Math.max(e.noise, 0.7); break;
+      case 'noise': e.noise = Math.max(e.noise, Math.min(1, ev.vel * 2.5)); break;
+      case 'data': case 'transmission': e.data = 1; break;
+      case 'crash': this.crashFrame = this.visOn('CRASH') ? 0 : 999; break;
     }
-    this.quanta?.onEvent(ev, this.time);
-    if (ev.x !== undefined && ev.type !== 'sub' && ev.type !== 'kick') {
-      const kind = { click: 1, glitch: 1, noise: 3, data: 4 }[ev.type] || 1;
-      const [ix, iy] = toImg(ev.x, ev.y);
-      this.shared.uSparks.value[this.sparkIdx].set(ix, iy, this.time, kind);
-      this.sparkIdx = (this.sparkIdx + 1) % 8;
-    }
-    for (const k in this.worlds) this.worlds[k].onEvent?.(ev, this.time);
+    const hAt = (x, y) => (this.map ? heightAt(this.map, x, y) : 0.5);
+    const stepDur = this.stepDur || 0.13;
+    for (const k in this.layers) if (this.layers[k].on) this.layers[k].onEvent(ev, this.time, hAt, stepDur);
   }
 
-  /**
-   * One frame. s = { dt, playing, form, cohere, energy, brk, stepF, beatPhase, intro }
-   */
-  frame(s) {
-    const dt = Math.min(0.1, s.dt);
-    this.adapt(s.dt);
-    this.time += dt * (s.playing ? 1 : 0.15);
-    const U = this.shared, e = this.env;
-    // envelopes: fast attack (on trigger), exponential release
-    e.kick *= Math.exp(-dt * 7); e.click *= Math.exp(-dt * 22); e.sine *= Math.exp(-dt * 5); e.noise *= Math.exp(-dt * 9);
+  /** One frame. f = { dt, playing, intro, low, state: { section, energy, scan, decay, form } | null } */
+  frame(f) {
+    const dt = Math.min(0.1, f.dt);
+    this.adapt(f.dt);
+    this.time += dt * (f.playing ? 1 : 0.15);
+    const U = this.shared, e = this.env, st = f.state;
+    e.kick *= Math.exp(-dt * 6); e.click *= Math.exp(-dt * 18); e.noise *= Math.exp(-dt * 8); e.data *= Math.exp(-dt * 10);
+    e.low += ((f.low || 0) - e.low) * Math.min(1, dt * 10);
     U.uTime.value = this.time;
-    U.uKick.value = e.kick; U.uClick.value = e.click; U.uSine.value = e.sine; U.uNoise.value = e.noise;
-    U.uBeat.value = this.beat; U.uStep.value = s.stepF || 0;
-    U.uEnergy.value = s.energy; U.uBreak.value = s.brk;
-    U.uForm.value = s.form; U.uCohere.value = s.cohere;
+    U.uKick.value = e.kick; U.uClick.value = e.click; U.uNoise.value = e.noise; U.uData.value = e.data; U.uLow.value = e.low;
     this.field.step(dt);
-    // white flash: counted in rendered FRAMES (never missed on a slow frame); the collapse flash lingers
-    const fl = this.flash, F = this.flashMat.uniforms, n = fl.frame === undefined ? 99 : fl.frame++;
-    F.uSeed.value = fl.seed + n * 0.37;
-    const FULL = { big: [1, 1, 1, 0.8, 0, 0.6, 0.45, 0, 0.3, 0.2, 0, 0.1], full: [1, 1, 0, 0.5], bands: [] }[fl.kind] || [];
-    const BANDS = { big: 18, full: 4, bands: 2 }[fl.kind] || 0;
-    F.uFull.value = n < FULL.length ? FULL[n] : 0;
-    F.uBands.value = n < BANDS ? (fl.kind === 'bands' && n === 1 ? 0.6 : 0.95) : 0;
-
-    // observer: smooth position + strength (collapses fast, dissolves slowly)
     const o = this.obs;
     if (o.init) {
       o.sx += (o.x - o.sx) * Math.min(1, dt * 14); o.sy += (o.y - o.sy) * Math.min(1, dt * 14);
-      o.s += (o.target - o.s) * Math.min(1, dt * (o.target > o.s ? 7 : 1.6));
+      o.s += (o.target - o.s) * Math.min(1, dt * (o.target > o.s ? 6 : 1.8));
       U.uObs.value.set(o.sx, o.sy, o.s);
     }
-    if (this.photoMat) this.photoMat.uniforms.uIntro.value = s.intro;
+    if (this.photoMat) this.photoMat.uniforms.uIntro.value = f.intro;
+    // the crash: the only full-screen flash — a few white frames, then black
+    const cf = this.crashFrame++;
+    const CRASH = [1, 1, 1, 1, 0.9, 0, 0.8, 0.6, 0, 0.45, 0.3, 0.2, 0.12, 0.06];
+    this.flashMat.uniforms.uFull.value = cf < CRASH.length ? CRASH[cf] : 0;
 
-    // world mix: primary ↔ secondary, the breakdown leans into the secondary
-    const accent = this.accent ?? 0.3;
-    // the accent world is a trace in normal sections and takes over in the breakdown
-    // one hand: the primary world alone; the accent world only while the piece falls away
-    const fade = 1 - (s.fade || 0);
-    const mp = (1 - s.brk * 0.7) * fade, ms = s.brk * 0.85 * fade;
-    for (const k in this.worlds) {
-      const w = this.worlds[k];
-      const target = k === this.primary ? mp : k === this.secondary ? ms : 0;
-      const m = w.mix + (target - w.mix) * Math.min(1, dt * 2.5);
-      w.setMix(m < 0.002 && target === 0 ? 0 : m);
-      if (w.mix > 0) w.update({ ...s, dt, t: this.time, kick: e.kick, click: e.click, sine: e.sine, noise: e.noise, beat: this.beat, view: this.view });
-      else if (target === 0 && k !== this.primary && k !== this.secondary) {   // fully faded and unused → free it
-        this.scene.remove(w.group); w.dispose(); delete this.worlds[k];
+    if (st && this.map) {
+      U.uForm.value += (st.form - U.uForm.value) * Math.min(1, dt * 1.5);
+      if (Math.abs(st.form - U.uForm.value) < 0.003) U.uForm.value = st.form;
+      U.uEnergy.value = st.energy; U.uDecay.value = this.visOn('DECAY') ? st.decay : 0;
+      U.uYaw.value = this.baseYaw + this.userYaw + Math.sin(this.time * 0.02) * 0.04;
+      const s = { ...st, dt, t: this.time, kick: e.kick, click: e.click, noise: e.noise, low: e.low };
+      const fade = st.fade ?? 1;
+      for (const k in this.layers) {
+        const l = this.layers[k];
+        const target = (k === 'terrain' ? 1 : k === 'orbit' ? (st.section === 'MAPPING' ? 0.4 : 1) : 1) * fade;
+        l.setMix(l.mix + (target - l.mix) * Math.min(1, dt * 2));
+        if (l.mix > 0) l.update(s);
       }
     }
-    if (this.quanta) { this.quanta.setMix(s.intro >= 1 && s.energy > 0 ? fade : 0); }
     this.renderer.render(this.scene, this.camera);
   }
 }

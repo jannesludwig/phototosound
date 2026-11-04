@@ -34,17 +34,18 @@
   <div class="corner tl"><div id="r-title">photo → sound</div><div id="r-sig">—</div></div>
   <div class="corner tr"><div id="r-bpm">—</div><div id="r-hz">—</div></div>
   <div class="corner bl"><div id="r-sec">—</div><div id="r-pos">—</div></div>
-  <div class="corner br">
-    <button id="r-world" title="switch world">—</button>
-    <div id="r-xy">—</div>
-    <ul id="worlds" hidden></ul>
-  </div>
+  <div class="corner br"><div id="r-map">—</div><div id="r-xy">—</div></div>
+
+  <!-- rotate the map: a thin vertical slider on the right edge (or drag the map) -->
+  <div id="yaw" title="rotate the map"><div id="yaw-track"></div><div id="yaw-knob"></div><div id="yaw-label">000°</div></div>
 
   <!-- sound debug mixer: press M (or tap "photo → sound") -->
   <aside id="mixer" hidden>
-    <div class="mx-head"><span>mixer</span><span id="mx-count">—</span></div>
+    <div class="mx-head"><span>sound</span><span id="mx-count">—</span></div>
     <div id="mx-rows"></div>
-    <div class="mx-foot">M toggles · mute / solo per layer</div>
+    <div class="mx-head mx-sub"><span>visual</span><span></span></div>
+    <div id="mx-vis"></div>
+    <div class="mx-foot"><span>M toggles · M mute · S solo</span><button id="mx-copy">copy settings</button></div>
   </aside>
 
   <!-- controls: appear on hover / tap -->
@@ -53,6 +54,7 @@
     <button id="b-new" title="new photograph">new</button>
     <label class="vol">vol <input id="b-vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
     <button id="b-rec" title="record a webm of picture and sound">rec</button>
+    <button id="b-loop" title="once: the image is consumed and the piece ends · loop: it continues">once</button>
   </div>
 
   <!-- A classic script that always runs, even if the app module fails to load in this browser:
