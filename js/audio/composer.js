@@ -125,6 +125,7 @@ export class Composer {
     const half = (b - L.start) % 2;
     for (const p of this.org.peaks) {
       if (b < p.awakeBar || b >= p.sleepBar) continue;
+      if (p.period <= 6 && Math.floor((b - L.start) / 2) % 2 === 1) continue;     // the fast ones breathe: every other 2-bar cycle
       for (let s = p.phase; s < 32; s += p.period) if (Math.floor(s / 16) === half) out.push({ step: s % 16, peak: p });
     }
     return out;
@@ -199,7 +200,7 @@ export class Composer {
         });
       }
     }
-    const maxN = 2 + Math.round(clamp(g / 0.8) * 7);
+    const maxN = 2 + Math.round(clamp(g / 0.8) * 5);
     const nerveSteps = [...arr.entries()].sort((a, c) => c[1].w - a[1].w).slice(0, maxN);
     let glitches = 0;
     for (const [step, { n, i, launch }] of nerveSteps) {

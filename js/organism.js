@@ -45,7 +45,7 @@ export function buildOrganism(map, analysis) {
   peaks.sort((a, b) => D(a, heart) - D(b, heart));                                  // the nearest awaken first
   const used = new Set();
   peaks.forEach((p, i) => {
-    let k = Math.min(PERIODS.length - 1, Math.floor(clamp(p.h * 0.7 + p.y * 0.3) * PERIODS.length));
+    let k = (Math.floor(p.h * 5) + Math.floor(p.x * 7) + Math.floor(p.y * 4)) % PERIODS.length;     // height + position → period
     while (used.has(PERIODS[k]) && used.size < PERIODS.length) k = (k + 1) % PERIODS.length;
     used.add(PERIODS[k]);
     p.id = i; p.period = PERIODS[k];
