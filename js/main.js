@@ -335,6 +335,36 @@ function mixRow(box, name, info, isSound) {
   box.appendChild(row);
   return { row, dot: row.querySelector('.mx-dot'), bar: row.querySelector('.mx-meter i') };
 }
+// the phase-2 systems and add-ons: one switch each, for their sound and their visuals together
+const SYSTEMS = {
+  HEARTBEAT: { sound: ['HEART'], visual: ['HEART', 'WAVES'], info: 'A · the epicenter beats, waves run out' },
+  POLYRHYTHM: { sound: ['PEAKS'], visual: ['PEAKS'], info: 'A · peaks pulse in their own periods' },
+  INTERFERENCE: { sound: ['INTERFERENCE'], visual: ['INTERFERENCE'], info: 'A · where waves meet: line + accent' },
+  'NERVOUS SYSTEM': { sound: ['NERVES'], visual: ['NERVES'], info: 'B · traces grow, impulses click' },
+  MEMORY: { sound: ['MEMORY'], visual: ['MEMORY'], info: 'the scan, re-sequenced' },
+  EROSION: { sound: ['EROSION'], visual: ['EROSION'], info: 'C · light drains downhill, ticks' },
+  SUPERPOSITION: { sound: [], visual: ['SUPERPOSITION'], info: 'E · ghost states, collapse' },
+  'PHOTO ON MAP': { sound: [], visual: ['PHOTO CORE', 'PIXELS', 'REVEAL'], info: 'core, pixels, local reveals' },
+};
+const sysOn = (n) => SYSTEMS[n].sound.every((L) => !audio.mute[L]) && SYSTEMS[n].visual.every((V) => !visuals.vis[V].mute);
+function syncMixerButtons() {
+  for (const L of LAYERS) { const b = mixer.rows[L].row.querySelectorAll('button'); b[0].classList.toggle('on', !!audio.mute[L]); b[1].classList.toggle('on', !!audio.solo[L]); }
+  for (const V of VISUAL_LAYERS) { const b = mixer.rows['v:' + V].row.querySelectorAll('button'); b[0].classList.toggle('on', visuals.vis[V].mute); b[1].classList.toggle('on', visuals.vis[V].solo); }
+  for (const n in SYSTEMS) { const b = mixer.rows['s:' + n].btn; const on = sysOn(n); b.textContent = on ? 'on' : 'off'; b.classList.toggle('on', on); }
+}
+for (const n in SYSTEMS) {
+  const row = document.createElement('div'); row.className = 'mx-row sys';
+  row.innerHTML = `<span class="mx-dot"></span><span class="mx-name">${n}</span><span class="mx-desc">${SYSTEMS[n].info}</span><button title="system on/off">on</button>`;
+  const btn = row.querySelector('button');
+  btn.addEventListener('click', () => {
+    const off = sysOn(n);
+    for (const L of SYSTEMS[n].sound) audio.setMute(L, off);
+    for (const V of SYSTEMS[n].visual) visuals.setVisual(V, 'mute', off);
+    syncMixerButtons();
+  });
+  $('mx-sys').appendChild(row);
+  mixer.rows['s:' + n] = { row, btn, dot: row.querySelector('.mx-dot') };
+}
 for (const L of LAYERS) mixer.rows[L] = mixRow($('mx-rows'), L, SOUND_INFO[L], true);
 for (const V of VISUAL_LAYERS) mixer.rows['v:' + V] = mixRow($('mx-vis'), V, VISUAL_INFO[V], false);
 function toggleMixer() { mixer.open = !mixer.open; $('mixer').hidden = !mixer.open; }
@@ -342,7 +372,8 @@ $('r-title').addEventListener('click', toggleMixer);
 $('mx-copy').addEventListener('click', async () => {
   const state = (m, s) => (s ? 'SOLO' : m ? 'mute' : 'on');
   const text = [
-    `photo→sound mixer · round 4 · sig ${app.analysis?.signature || '-'} · ${audio.loopMode ? 'loop' : 'once'}`,
+    `photo→sound mixer · round 5 · sig ${app.analysis?.signature || '-'} · ${audio.loopMode ? 'loop' : 'once'}`,
+    'systems: ' + Object.keys(SYSTEMS).map((n) => `${n.replace(/ /g, '_')}=${sysOn(n) ? 'on' : 'off'}`).join('  '),
     'sound:  ' + LAYERS.map((L) => `${L}=${state(audio.mute[L], audio.solo[L])}`).join('  '),
     'visual: ' + VISUAL_LAYERS.map((V) => `${V}=${state(visuals.vis[V].mute, visuals.vis[V].solo)}`).join('  '),
   ].join('\n');
@@ -363,6 +394,11 @@ function updateMixer() {
     r.bar.style.width = Math.min(100, (lv[L] || 0) * 260) + '%';
   }
   for (const V of VISUAL_LAYERS) mixer.rows['v:' + V].row.classList.toggle('off', !visuals.visOn(V));
+  for (const n in SYSTEMS) {
+    const r = mixer.rows['s:' + n];
+    r.dot.classList.toggle('hit', SYSTEMS[n].sound.some((L) => act.includes(L)));
+    if (r.btn.classList.contains('on') !== sysOn(n)) syncMixerButtons();
+  }
   $('mx-count').textContent = `${audio.activeLayers(2).length} sounding`;
 }
 

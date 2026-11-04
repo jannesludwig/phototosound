@@ -97,7 +97,7 @@ body.state-playing.ui #controls { opacity: 1; pointer-events: auto; }
 /* ── sound debug mixer (M) ───────────────────────────── */
 #mixer {
   position: fixed; left: 18px; top: 50%; transform: translateY(-50%); z-index: 5;
-  width: 410px; padding: 10px 12px; background: rgba(0, 0, 0, 0.94); border: 1px solid rgba(232, 238, 242, 0.12);
+  width: 440px; padding: 10px 12px; background: rgba(0, 0, 0, 0.94); border: 1px solid rgba(232, 238, 242, 0.12);
   font-size: 9px; color: var(--dim); font-variant-numeric: tabular-nums;
 }
 #mixer[hidden] { display: none; }
@@ -107,7 +107,7 @@ body.state-playing.ui #controls { opacity: 1; pointer-events: auto; }
 #mx-copy { color: var(--dim); border: 1px solid rgba(232, 238, 242, 0.2); padding: 2px 6px; font-size: 8px; }
 #mx-copy:hover { color: var(--fg); }
 #mixer { max-height: 92vh; overflow-y: auto; }
-.mx-row { display: grid; grid-template-columns: 9px 84px 1fr 54px 18px 18px; align-items: center; gap: 6px; padding: 3px 0; }
+.mx-row { display: grid; grid-template-columns: 9px 98px 1fr 54px 18px 18px; align-items: center; gap: 6px; padding: 3px 0; }
 .mx-row.off { opacity: 0.35; }
 .mx-dot { width: 5px; height: 5px; background: rgba(232, 238, 242, 0.15); }
 .mx-dot.hit { background: var(--fg); }
@@ -117,6 +117,8 @@ body.state-playing.ui #controls { opacity: 1; pointer-events: auto; }
 .mx-meter i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--fg); width: 0; }
 .mx-row button { padding: 1px 0; color: var(--faint); border: 1px solid rgba(232, 238, 242, 0.15); font-size: 8px; }
 .mx-row button.on { color: #000; background: var(--fg); }
+.mx-row.sys { grid-template-columns: 9px 98px 1fr 42px; }
+.mx-row.sys button { font-size: 8px; letter-spacing: 0.08em; }
 #r-title { cursor: default; }
 @media (max-width: 640px) { #mixer { left: 8px; right: 8px; width: auto; } }
 
