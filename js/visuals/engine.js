@@ -1,49 +1,37 @@
 // ─────────────────────────────────────────────────────────────
 //  visuals/engine.js — renderer and orchestration of the sound map.
 //
-//  One visual language: the terrain (terrain.js) and, once the map comes
-//  alive, its systems — the heart and the peaks (orbit.js), the nerves
-//  (nerves.js), erosion (erosion.js) — plus edge flashes and the
-//  crumbling border in decay. Every sound event is dispatched to the
-//  layers with its position, so it has a visible consequence at its
-//  place on the map. Each phase shows at most 3–4 systems. The only
-//  full-screen flash is the crash at the very end. Every layer can be
-//  switched off in the mixer.
+//  One visual language: the terrain (terrain.js) with light add-ons —
+//  edge flashes, the focal orbit, the crumbling border, rare quantum
+//  slicing. Every sound event is dispatched to the layers with its
+//  position (and the height of the map there), so it has a visible
+//  consequence at a specific place. The only full-screen flash is the
+//  crash at the very end. Each layer can be switched off in the mixer.
 // ─────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { makeSharedUniforms, makeMaterial, toImg } from './common.js';
 import { ForceField } from './field.js';
 import { Terrain } from './terrain.js';
 import { EdgeFlash } from './edges.js';
-import { Heart, Peaks } from './orbit.js';
-import { Nerves } from './nerves.js';
-import { Erosion } from './erosion.js';
+import { Orbit } from './orbit.js';
 import { Crumble } from './crumble.js';
+import { Slicing } from './slicing.js';
 import { heightAt } from '../map.js';
 
-export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'PHOTO CORE', 'PIXELS', 'REVEAL',
-  'HEART', 'WAVES', 'PEAKS', 'INTERFERENCE', 'NERVES', 'MEMORY', 'EROSION', 'SUPERPOSITION', 'EDGE FLASH', 'CRUMBLE', 'ANNOTATIONS', 'CRASH', 'HAND'];
-const TERRAIN_SHOW = { CONTOURS: 'Contours', WIREFRAME: 'Wire', RIDGES: 'Ridges', SCAN: 'Scan', FLARES: 'Flares', DECAY: 'Decay', 'PHOTO CORE': 'Core', PIXELS: 'Pixels', REVEAL: 'Reveal', WAVES: 'Waves', INTERFERENCE: 'Interf', MEMORY: 'Memory', SUPERPOSITION: 'Ghost' };
-const LAYER_OBJ = { TERRAIN: 'terrain', HEART: 'orbit', PEAKS: 'peaks', NERVES: 'nerves', EROSION: 'erosion', 'EDGE FLASH': 'edges', CRUMBLE: 'crumble' };
-// which systems are on screen in each phase (≤ 3–4 clearly visible at once)
-const PHASE_MIX = {
-  READING: { orbit: 0, peaks: 0, nerves: 0 },
-  AWAKENING: { orbit: 1, peaks: 0, nerves: 0 },
-  LIFE: {}, DECAY: {}, END: {},
-};
+export const VISUAL_LAYERS = ['TERRAIN', 'CONTOURS', 'WIREFRAME', 'RIDGES', 'SCAN', 'FLARES', 'DEFORM', 'DECAY', 'EDGE FLASH', 'ORBIT', 'CRUMBLE', 'SLICING', 'ANNOTATIONS', 'CRASH', 'HAND'];
+const TERRAIN_SHOW = { CONTOURS: 'Contours', WIREFRAME: 'Wire', RIDGES: 'Ridges', SCAN: 'Scan', FLARES: 'Flares', DECAY: 'Decay' };
+const LAYER_OBJ = { TERRAIN: 'terrain', 'EDGE FLASH': 'edges', ORBIT: 'orbit', CRUMBLE: 'crumble', SLICING: 'slicing' };
 
 const FOV = 30;
 const CAM_Z = 1 / Math.tan((FOV / 2) * Math.PI / 180);
 
-// the photograph before the map exists — already on the terrain's surface and pose, so the
-// hand-over to the terrain (which carries the photo ahead of the scan) is seamless
 const PHOTO_VERT = /* glsl */`
 varying vec2 vP;
-void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(mapPos(vP, terrainZ(vP)), 1.0); }`;
+void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy * uHalf, 0.0, 1.0); }`;
 const PHOTO_FRAG = /* glsl */`
 uniform float uIntro;
 varying vec2 vP;
-void main() { float a = uIntro; if (a < 0.01) discard; gl_FragColor = vec4(photo(vP), a); }`;
+void main() { float a = uIntro * (1.0 - uForm); if (a < 0.02) discard; gl_FragColor = vec4(photo(vP), a); }`;
 const FLASH_VERT = /* glsl */`void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const FLASH_FRAG = /* glsl */`uniform float uFull; void main() { if (uFull < 0.003) discard; gl_FragColor = vec4(1.0, 1.0, 1.0, uFull); }`;
 
@@ -88,7 +76,7 @@ export class Visuals {
     this.shared.uForm.value = 0; this.shared.uDecay.value = 0;
     this.obs.s = 0; this.obs.target = 0;
     this.photoMat = makeMaterial(this.shared, { vertex: PHOTO_VERT, fragment: PHOTO_FRAG, uniforms: { uIntro: { value: 0 } }, blending: THREE.NormalBlending });
-    this.photo = new THREE.Mesh(new THREE.PlaneGeometry(2, 2, 96, 64), this.photoMat);
+    this.photo = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.photoMat);
     this.photo.renderOrder = -1; this.photo.frustumCulled = false;
     this.scene.add(this.photo);
     this.crashFrame = 999;
@@ -96,14 +84,14 @@ export class Visuals {
   }
 
   /** The analysis is done: build the sound map's layers. */
-  beginMap(map, st, org) {
-    this.map = map; this.org = org;
+  beginMap(map, st) {
+    this.map = map;
     const P = map.params;
     this.shared.uAccent.value.setRGB(...P.accent);
     this.shared.uAmp.value = P.relief; this.shared.uTilt.value = P.tilt;
     this.baseYaw = P.yaw;
-    const ctx = { shared: this.shared, analysis: this.analysis, map, st, org, quality: this.quality, view: this.view, waveV: org.waveV, stepDur: this.stepDur };
-    this.layers = { terrain: new Terrain(ctx), nerves: new Nerves(ctx), orbit: new Heart(ctx), peaks: new Peaks(ctx), erosion: new Erosion(ctx), edges: new EdgeFlash(ctx), crumble: new Crumble(ctx) };
+    const ctx = { shared: this.shared, analysis: this.analysis, map, st, quality: this.quality, view: this.view };
+    this.layers = { terrain: new Terrain(ctx), edges: new EdgeFlash(ctx), orbit: new Orbit(ctx), crumble: new Crumble(ctx), slicing: new Slicing(ctx) };
     for (const k in this.layers) { const l = this.layers[k]; l.setMix(0); l.resize(this.view); this.scene.add(l.group); }
     this.applyVisuals();
   }
@@ -172,7 +160,7 @@ export class Visuals {
     const U = this.shared, form = U.uForm.value;
     const [ix, iy] = toImg(x, y);
     const h = this.map ? heightAt(this.map, x, y) : 0;
-    const z = ((h - 0.45) * U.uAmp.value * (0.8 + 0.45 * U.uLow.value) * form * (1 - 0.55 * U.uDecay.value)) + lift;
+    const z = ((h - 0.45) * U.uAmp.value * (0.8 + 0.45 * U.uLow.value) * form) + lift;
     let px = ix * this.view.half.x, py = iy * this.view.half.y;
     const yaw = U.uYaw.value * form, c = Math.cos(yaw), s = Math.sin(yaw);
     [px, py] = [c * px - s * py, s * px + c * py];
@@ -185,21 +173,8 @@ export class Visuals {
   setUserYaw(rad) { this.userYaw = rad; }
 
   // ── input ───────────────────────────────────────────────────
-  /** The map point (analysis coords) under a screen point: coarse search over the posed terrain, then refine. */
-  pickMap(x, y) {
-    let best = [0.5, 0.5], bd = 1e9;
-    const test = (u, v) => { const [px, py, pz] = this.project(u, v); if (pz > 1) return; const d = (px - x) ** 2 + (py - y) ** 2; if (d < bd) { bd = d; best = [u, v]; } };
-    for (let j = 0; j <= 24; j++) for (let i = 0; i <= 36; i++) test(i / 36, j / 24);
-    for (let r = 0; r < 2; r++) { const [u0, v0] = best, s = r ? 1 / 288 : 1 / 72; for (let j = -4; j <= 4; j++) for (let i = -4; i <= 4; i++) test(Math.min(1, Math.max(0, u0 + i * s)), Math.min(1, Math.max(0, v0 + j * s))); }
-    return { x: best[0], y: best[1], px: Math.sqrt(bd) };
-  }
   observe(x, y, active) {
-    let [wx, wy] = this.screenToWorld(x, y);
-    if (this.map && this.shared.uForm.value > 0.02 && (active || this.obs.s > 0.01)) {   // on the posed map: reveal where the finger is on the terrain
-      const m = this.pickMap(x, y); const [ix, iy] = toImg(m.x, m.y);
-      wx = ix * this.view.half.x; wy = iy * this.view.half.y;
-      if (m.px > 60) active = false;
-    }
+    const [wx, wy] = this.screenToWorld(x, y);
     this.obs.x = wx; this.obs.y = wy; this.obs.target = active ? 1 : 0;
     if (!this.obs.init) { this.obs.sx = wx; this.obs.sy = wy; this.obs.init = true; }
   }
@@ -220,7 +195,7 @@ export class Visuals {
       case 'click': e.click = Math.max(e.click, ev.vel); break;
       case 'glitch': e.click = 1; e.noise = Math.max(e.noise, 0.7); break;
       case 'noise': e.noise = Math.max(e.noise, Math.min(1, ev.vel * 2.5)); break;
-      case 'data': e.data = 1; break;
+      case 'data': case 'transmission': e.data = 1; break;
       case 'crash': this.crashFrame = this.visOn('CRASH') ? 0 : 999; break;
     }
     const hAt = (x, y) => (this.map ? heightAt(this.map, x, y) : 0.5);
@@ -245,8 +220,7 @@ export class Visuals {
       o.s += (o.target - o.s) * Math.min(1, dt * (o.target > o.s ? 6 : 1.8));
       U.uObs.value.set(o.sx, o.sy, o.s);
     }
-    const tm = this.layers.terrain ? this.layers.terrain.mix : 0;
-    if (this.photoMat) this.photoMat.uniforms.uIntro.value = f.intro * (1 - tm);
+    if (this.photoMat) this.photoMat.uniforms.uIntro.value = f.intro;
     // the crash: the only full-screen flash — a few white frames, then black
     const cf = this.crashFrame++;
     const CRASH = [1, 1, 1, 1, 0.9, 0, 0.8, 0.6, 0, 0.45, 0.3, 0.2, 0.12, 0.06];
@@ -261,7 +235,7 @@ export class Visuals {
       const fade = st.fade ?? 1;
       for (const k in this.layers) {
         const l = this.layers[k];
-        const target = (PHASE_MIX[st.section]?.[k] ?? 1) * fade;
+        const target = (k === 'terrain' ? 1 : k === 'orbit' ? (st.section === 'MAPPING' ? 0.4 : 1) : 1) * fade;
         l.setMix(l.mix + (target - l.mix) * Math.min(1, dt * 2));
         if (l.mix > 0) l.update(s);
       }
