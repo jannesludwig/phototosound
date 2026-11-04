@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { makeSharedUniforms, makeMaterial, toImg } from './common.js';
-import { makeSharedUniforms as makeSpectraUniforms } from '../spectra/common.js';
+import { makeSharedUniforms as makeSpectraUniforms, makeMaterial as makeSpectraMaterial } from '../spectra/common.js';
 import { ForceField } from './field.js';
 import { Terrain } from './terrain.js';
 import { EdgeFlash } from './edges.js';
@@ -48,6 +48,21 @@ const PHOTO_FRAG = /* glsl */`
 uniform float uIntro;
 varying vec2 vP;
 void main() { if (uIntro < 0.01) discard; gl_FragColor = vec4(photo(vP), uIntro); }`;
+// the quantum lens: where the cursor observes, a glimpse of the measured photo (fine scanlines, cooled) on the image plane
+const LENS_VERT = /* glsl */`
+varying vec2 vP;
+void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy * uHalf, 0.0, 1.0); }`;
+const LENS_FRAG = /* glsl */`
+varying vec2 vP;
+void main() {
+  float d = distance(vP * uHalf, uObs.xy);
+  float o = uObs.z * (1.0 - smoothstep(uObsR * 0.15, uObsR, d));
+  if (o < 0.01 || abs(vP.x) > 1.0 || abs(vP.y) > 1.0) discard;
+  vec3 c = photo(vP);
+  c = mix(vec3(luma(c)), c, 0.55) * (0.75 + 0.25 * step(0.5, fract(gl_FragCoord.y * 0.5)));
+  float ring = (1.0 - smoothstep(0.0, uPx * 1.5, abs(d - uObsR * 0.92))) * uObs.z * 0.25;
+  gl_FragColor = vec4((c * o * 0.8 + ring) * uMix, 1.0);
+}`;
 // full-screen: the crash (full white) and Ikeda bands (thin white rows, a glitch in ENTROPY)
 const FLASH_VERT = /* glsl */`varying vec2 vUv; void main() { vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const FLASH_FRAG = /* glsl */`
@@ -147,12 +162,15 @@ export class Visuals {
     this.spectra = {};
     for (const sg of journey.segs) this.spectra[sg.name] = new SPECTRUM_CLASSES[sg.name](sctx);
     this.spectra.ENTROPY = new Entropy(sctx);
+    this.lensMat = makeSpectraMaterial(this.sshared, { vertex: LENS_VERT, fragment: LENS_FRAG });
+    this.lens = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.lensMat); this.lens.frustumCulled = false; this.lens.renderOrder = 10; this.scene.add(this.lens);
     for (const l of [...Object.values(this.layers), ...Object.values(this.spectra)]) { l.setMix(0); l.resize(this.view); this.scene.add(l.group); }
     this.applyVisuals();
   }
 
   clearPhoto() {
     for (const l of [...Object.values(this.layers), ...Object.values(this.spectra)]) { this.scene.remove(l.group); l.dispose(); }
+    if (this.lens) { this.scene.remove(this.lens); this.lens.geometry.dispose(); this.lensMat.dispose(); this.lens = null; }
     this.layers = {}; this.spectra = {}; this.map = null; this.C = null;
     if (this.photo) { this.scene.remove(this.photo); this.photo.geometry.dispose(); this.photoMat.dispose(); this.photo = null; }
     if (this.texture) { this.texture.dispose(); this.texture = null; }
@@ -354,6 +372,8 @@ export class Visuals {
       w.setMix(w.mix + (target - w.mix) * Math.min(1, dt * 3));
       if (w.mix > 0.002) w.update({ dt, t: this.time, energy: st.energy, brk: 0, form: 1, kick: this.env.kick, click: this.env.click, sine: this.env.sine, noise: this.env.noise, beat: this.beat, view: this.view, stepF: st.stepF });
     });
+    // the lens shows its glimpse only off the terrain (act 1 has its own reveal) and never after the entropy
+    if (this.lensMat) this.lensMat.uniforms.uMix.value = this.visOn('LENS') ? ss(D.start, D.start + 1.5, lb) * (1 - ss(Ab.start - 1, Ab.start, lb)) : 0;
     // entropy → absorption → debris
     const En = this.spectra.ENTROPY;
     const debris = ss(end + 0.05, end + 0.4, lb);
