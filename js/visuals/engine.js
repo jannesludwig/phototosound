@@ -53,6 +53,8 @@ export class Visuals {
     this.sparkIdx = 0;
     this.beat = 0;
     this.obs = { x: 0, y: 0, s: 0, target: 0 };
+    this.dprScale = 1;           // lowered automatically if frames are slow
+    this.slow = 0; this.dtAvg = 1 / 60;
     this.resize();
   }
 
@@ -113,7 +115,7 @@ export class Visuals {
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.mobile ? 1.5 : 2);
+    const dpr = Math.max(0.75, Math.min(window.devicePixelRatio || 1, this.quality.mobile ? 1.5 : 2) * this.dprScale);
     const W = window.innerWidth, H = window.innerHeight;
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(W, H, false);
@@ -134,6 +136,17 @@ export class Visuals {
     this.shared.uPx.value = 2 / (H * dpr);
     this.shared.uObsR.value = W < 700 ? 0.42 : 0.32;
     for (const k in this.worlds) this.worlds[k].resize(this.view);
+  }
+
+  /** Keep ~60 fps: if frames stay slow for ~2 s, render at a lower resolution. */
+  adapt(dt) {
+    if (!this.photo || dt > 0.25) return;                // ignore tab switches
+    this.dtAvg += (dt - this.dtAvg) * 0.05;
+    this.slow = this.dtAvg > 1 / 42 ? this.slow + 1 : Math.max(0, this.slow - 2);
+    if (this.slow > 120 && this.dprScale > 0.5) {
+      this.dprScale *= 0.8; this.slow = 0; this.dtAvg = 1 / 60;
+      this.resize();
+    }
   }
 
   /** CSS pixel → world coords on the z=0 plane. */
@@ -183,6 +196,7 @@ export class Visuals {
    */
   frame(s) {
     const dt = Math.min(0.1, s.dt);
+    this.adapt(s.dt);
     this.time += dt * (s.playing ? 1 : 0.15);
     const U = this.shared, e = this.env;
     // envelopes: fast attack (on trigger), exponential release
@@ -204,7 +218,8 @@ export class Visuals {
 
     // world mix: primary ↔ secondary, the breakdown leans into the secondary
     const accent = this.accent ?? 0.3;
-    const mp = 1 - s.brk * 0.85, ms = Math.min(1, accent * 0.9 + s.brk * (1 - accent * 0.9));
+    // the accent world is a trace in normal sections and takes over in the breakdown
+    const mp = 1 - s.brk * 0.85, ms = Math.min(1, accent * 0.6 + s.brk * (1 - accent * 0.6));
     for (const k in this.worlds) {
       const w = this.worlds[k];
       const target = k === this.primary ? mp : k === this.secondary ? ms : 0;

@@ -51,12 +51,9 @@ export class AudioEngine {
     this.recordDest = ctx.createMediaStreamDestination ? ctx.createMediaStreamDestination() : null;
     if (this.recordDest) trim.connect(this.recordDest);
 
-    // bitcrush bus: staircase waveshaper (≈ 4 bit)
-    this.crushBus = ctx.createWaveShaper();
-    const curve = new Float32Array(4096);
-    for (let i = 0; i < curve.length; i++) { const x = i / (curve.length - 1) * 2 - 1; curve[i] = Math.round(x * 7) / 7; }
-    this.crushBus.curve = curve;
-    this.crushBus.connect(this.master);
+    // bitcrush: staircase waveshaper curve (≈ 4 bit); one shaper per piece (see start())
+    this.crushCurve = new Float32Array(4096);
+    for (let i = 0; i < 4096; i++) { const x = i / 4095 * 2 - 1; this.crushCurve[i] = Math.round(x * 7) / 7; }
 
     // "space" for sustained sines: a short, dark, dry-ish ping-pong — not a wash
     this.delayIn = ctx.createGain(); this.delayIn.gain.value = 0;
@@ -128,7 +125,9 @@ export class AudioEngine {
   start(startBar = 0) {
     const ctx = this.ensureContext();
     this.stopPiece();
-    this.pieceGain = ctx.createGain(); this.pieceGain.connect(this.master);
+    this.pieceGain = ctx.createGain(); this.pieceGain.gain.value = 0.7; // headroom: the limiter only catches peaks
+    this.pieceGain.connect(this.master);
+    this.crushBus = ctx.createWaveShaper(); this.crushBus.curve = this.crushCurve; this.crushBus.connect(this.pieceGain);
     this.startTime = ctx.currentTime + 0.12 - startBar * this.barDur;
     this.nextStep = startBar * STEPS;
     this.events = [];

@@ -161,27 +161,29 @@ function placeReadout() {
   const el = $('readout');
   if (!visuals.photo) return;
   const r = visuals.imageRect();
-  const narrow = innerWidth < 700;
-  const below = innerHeight - (r.y + r.h);
-  if (narrow || below > 150) { el.style.left = r.x + 'px'; el.style.top = (r.y + r.h + 14) + 'px'; }
-  else { el.style.left = (r.x + r.w + 18) + 'px'; el.style.top = r.y + 'px'; }
+  const right = innerWidth - (r.x + r.w), below = innerHeight - (r.y + r.h);
+  el.classList.remove('inset');
+  if (right >= 200) { el.style.left = (r.x + r.w + 18) + 'px'; el.style.top = r.y + 'px'; }
+  else if (below >= 175) { el.style.left = r.x + 'px'; el.style.top = (r.y + r.h + 22) + 'px'; }
+  else { el.classList.add('inset'); el.style.left = (r.x + 10) + 'px'; el.style.top = (r.y + 10) + 'px'; } // over the photo
 }
 const fmt = (x) => x.toFixed(2);
 function subjectLine(f) {
-  return f.face > 0 ? `subject: <span class="hot">face ${fmt(f.face)}</span> · size ${fmt(f.faceSize)}` : `subject: ${f.organic > 0.35 ? 'organic ' + fmt(f.organic) : 'none'}`;
+  return f.face > 0 ? `subject: <span class="hot">face ${fmt(f.face)}</span>` : `subject: ${f.organic > 0.35 ? 'organic ' + fmt(f.organic) : 'none'}`;
 }
-// lines revealed at scan progress p
+// short lines revealed at scan progress p
 function readingLines(a) {
   const f = a.features;
   const pal = a.palette.map((c) => `<i class="sw" style="background:rgb(${c.r * 255 | 0},${c.g * 255 | 0},${c.b * 255 | 0})"></i>`).join('');
   return [
-    [0.02, `reading ${a.width * 8}×${a.height * 8} → signature <span class="hot">${a.signature}</span>`],
-    [0.14, `luminance: ${fmt(f.brightness)} · contrast: ${fmt(f.contrast)} · saturation: ${fmt(f.saturation)}`],
-    [0.28, `structure: ${f.lineStrength > 0.35 ? 'linear' : 'diffuse'} ${fmt(f.lineStrength)} · orientation: ${f.lineOrientation === 'h' ? '—' : '|'} ${fmt(f.hvRatio)}`],
-    [0.42, `luminance points: ${f.pointCount} · spread ${fmt(f.pointSpread)} · radial ${fmt(f.circularity)}`],
-    [0.56, `gradient: ${f.smoothness > 0.5 ? 'smooth' : 'textured'} ${fmt(f.smoothness)} · detail ${fmt(f.detail)}`],
-    [0.7, `flow: ${fmt(f.flow)} · flatness ${fmt(f.flatness)} · colours ${f.colorCount}`],
-    [0.84, `palette: ${pal}`],
+    [0.02, `signature: <span class="hot">${a.signature}</span>`],
+    [0.13, `luminance: ${fmt(f.brightness)} · contrast ${fmt(f.contrast)}`],
+    [0.25, `structure: ${f.lineStrength > 0.4 ? 'linear' : 'diffuse'} ${fmt(f.lineStrength)} ${f.lineOrientation === 'h' ? '—' : '|'}`],
+    [0.37, `luminance points: ${f.pointCount}`],
+    [0.49, `radial: ${fmt(f.circularity)} · flow ${fmt(f.flow)}`],
+    [0.61, `gradient: ${f.smoothness > 0.5 ? 'smooth' : 'textured'} ${fmt(f.smoothness)}`],
+    [0.73, `flatness: ${fmt(f.flatness)} · colours ${f.colorCount}`],
+    [0.85, `palette: ${pal}`],
   ];
 }
 
@@ -204,7 +206,7 @@ function onPointer(e, active) {
 }
 addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons) onPointer(e, true); if (e.pointerType === 'mouse') showUI(); }, { passive: true });
 addEventListener('pointerdown', (e) => {
-  audio.unlock();
+  if (!app.paused) audio.unlock();     // first tap unlocks audio (iOS) — but never un-pauses
   if (app.awaitTap) { const r = app.awaitTap; app.awaitTap = null; r(); }
   onPointer(e, true); showUI();
 });
@@ -413,4 +415,4 @@ if (hashParams.get('demo')) {
   if (d) setTimeout(() => begin(d.make(), d.name, demoBytes(d)), 300);
 }
 // expose for debugging in the console
-window.__p2s = { app, audio, visuals };
+window.__p2s = { app, audio, visuals, recorder };

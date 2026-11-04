@@ -19,9 +19,9 @@ void main() {
   float coh = coherence(pImg);
   vec3 pc = photo(pImg);
   float l = luma(pc);
-  vCol = mix(pc * 1.5 + 0.04, uAccent, 0.12 * step(0.97, fract(aAlpha * 97.13)));
-  vA = aAlpha * uMix * (1.0 - coh) * (0.25 + 0.75 * smoothstep(0.03, 0.45, l)) * (0.7 + uKick * 0.5);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy, 0.0, 1.0);
+  vCol = mix(pc * 1.9 + 0.08, uAccent, 0.5 * step(0.96, fract(position.z * 97.13)));
+  vA = aAlpha * uMix * (1.0 - coh) * (0.4 + 0.6 * smoothstep(0.02, 0.4, l)) * (0.8 + uKick * 0.6);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy, 0.0, 1.0);  // (z = id, not depth)
 }`;
 const FRAG = /* glsl */`
 varying vec3 vCol;
@@ -38,7 +38,7 @@ export class Flow extends World {
     this.rng = makeRng(analysis.seed ^ 0xf10e);
     this.field = analysis.maps.flowField;
     this.aspect = analysis.width / analysis.height;
-    const n = this.n = Math.round((quality.mobile ? 3500 : 9000) * params.density);
+    const n = this.n = Math.round((quality.mobile ? 5000 : 14000) * params.density);
 
     // spawn distribution: weighted by edge strength (streaks gather on structure)
     const Gm = analysis.maps.Gm, W = analysis.width, H = analysis.height;
@@ -108,9 +108,9 @@ export class Flow extends World {
       this.x[i] = x; this.y[i] = y;
       // streak: head at the particle, tail behind it along the velocity
       const wx = x * hx, wy = y * hy;
-      const len = 0.012 + sp * 0.22;
+      const len = 0.02 + sp * 0.34;
       const k = i * 6;
-      P[k] = wx; P[k + 1] = wy;
+      P[k] = wx; P[k + 1] = wy; P[k + 2] = P[k + 5] = (i % 101) / 101;   // z carries a stable per-particle id
       P[k + 3] = wx - v[0] * len; P[k + 4] = wy - v[1] * len;
       const t = this.age[i] / this.life[i];
       const a = Math.sin(Math.PI * t);
