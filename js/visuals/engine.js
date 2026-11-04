@@ -219,7 +219,9 @@ export class Visuals {
     // world mix: primary ↔ secondary, the breakdown leans into the secondary
     const accent = this.accent ?? 0.3;
     // the accent world is a trace in normal sections and takes over in the breakdown
-    const mp = 1 - s.brk * 0.85, ms = Math.min(1, accent * 0.6 + s.brk * (1 - accent * 0.6));
+    // one hand: the primary world alone; the accent world only while the piece falls away
+    const fade = 1 - (s.fade || 0);
+    const mp = (1 - s.brk * 0.7) * fade, ms = s.brk * 0.85 * fade;
     for (const k in this.worlds) {
       const w = this.worlds[k];
       const target = k === this.primary ? mp : k === this.secondary ? ms : 0;

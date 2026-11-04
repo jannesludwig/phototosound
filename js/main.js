@@ -6,7 +6,7 @@
 import { analyzeImage, rasterize } from './analysis.js';
 import { preloadFaceDetector, detectFace } from './face.js';
 import { chooseWorlds, pieceParams, WORLDS } from './worlds.js';
-import { Composer, readWindow, LOOP_BARS, VOID_BAR, SECTIONS, STEPS } from './audio/composer.js';
+import { Composer, readWindow, STEPS } from './audio/composer.js';
 import { AudioEngine } from './audio/engine.js';
 import { Visuals } from './visuals/engine.js';
 import { Recorder } from './recorder.js';
@@ -300,14 +300,17 @@ function frame(now) {
   let pos = null;
   if (app.state === 'playing' && audio.stepDur) {
     pos = audio.position();
-    const barF = pos.stepF / STEPS, loopBarF = barF % LOOP_BARS;
+    const C = app.composer, barF = pos.barF, loopBarF = pos.loopBarF;
     // form: the photograph crosses over during the first bars, then stays crossed
     app.form = Math.max(app.form, smoothstep(0.25, 6, barF));
-    // the void: once per loop the full image briefly re-coheres
-    const cohere = smoothstep(VOID_BAR - 0.4, VOID_BAR + 0.05, loopBarF) * (1 - smoothstep(VOID_BAR + 1, VOID_BAR + 1.45, loopBarF));
-    const brk = smoothstep(56, 58, loopBarF) * (1 - smoothstep(VOID_BAR, VOID_BAR + 1, loopBarF));
+    // the collapse: on the big glitch the full image snaps back for one bar (once per loop)
+    const CB = C.collapseBar, fall = C.sections[3], sil = C.sections[4];
+    const cohere = smoothstep(CB - 0.02, CB + 0.02, loopBarF) * (1 - smoothstep(CB + 0.85, CB + 1.3, loopBarF));
+    // falling away: the accent world takes over softly, then everything fades to black
+    const brk = smoothstep(fall.start + 0.5, fall.start + 3, loopBarF) * (1 - smoothstep(sil.start - 2, sil.start, loopBarF));
+    const fade = smoothstep(sil.start, sil.start + sil.bars - 2, loopBarF);
     app.energy += (pos.section.energy - app.energy) * Math.min(1, dt * 0.8);
-    s = { ...s, form: app.form, cohere, brk, energy: app.energy, stepF: pos.stepF, beatPhase: pos.beatPhase };
+    s = { ...s, form: app.form, cohere, brk, fade, energy: app.energy, stepF: pos.stepF, beatPhase: pos.beatPhase };
     // audio events → visuals (against the heard clock)
     for (const ev of audio.drain(audio.heardTime())) {
       visuals.trigger(ev);
@@ -325,7 +328,7 @@ function updateCorners(pos) {
   if (!pos) return;
   const sec = pos.section;
   $('r-sec').textContent = `${String(sec.index + 1).padStart(2, '0')} ${sec.name} ${String(sec.barInSection + 1).padStart(2, '0')}/${sec.bars}`;
-  $('r-pos').textContent = `bar ${String(pos.loopBar + 1).padStart(2, '0')}/${LOOP_BARS} · step ${String(pos.step + 1).padStart(2, '0')}`;
+  $('r-pos').textContent = `bar ${String(pos.loopBar + 1).padStart(2, '0')}/${app.composer.loopBars} · step ${String(pos.step + 1).padStart(2, '0')}`;
   if (recorder.active) $('b-rec').textContent = `rec ${recorder.seconds.toFixed(0)}s`;
   const o = visuals.obs;
   const r = visuals.imageRect();
@@ -376,7 +379,7 @@ function drawOverlay(now, pos) {
   if (app.state === 'playing' && pos) {
     const fade = 0.55;
     // read-head: which rows (band) and which columns the sequencer reads
-    const win = readWindow(pos.loopBar, a.grid);
+    const win = readWindow(pos.loopBar, a.grid, app.composer.loopBars);
     const yb0 = r.y + win.band / a.grid.rows * r.h, yb1 = r.y + (win.band + 8) / a.grid.rows * r.h;
     octx.strokeStyle = `rgba(232,238,242,${0.35 * fade})`;
     octx.beginPath(); octx.moveTo(r.x - 10, yb0); octx.lineTo(r.x - 4, yb0); octx.lineTo(r.x - 4, yb1); octx.lineTo(r.x - 10, yb1); octx.stroke();

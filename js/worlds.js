@@ -40,22 +40,27 @@ export function chooseWorlds(f, seed) {
 }
 
 /**
- * Sound style per world. Values are blended between primary and secondary
- * (and pushed further toward the secondary during the breakdown).
+ * Sound style per world (round 3). Numbers are blended primary → accent;
+ * the categorical choices (kick pattern, sub mode, data kind) come from the
+ * primary world only — one artist, one hand per image.
+ *   kick       insistent kick steps (repeated all piece long)
+ *   sub        'drone' (slow sustained movement) or 'pulse' (gated sub pulses on subSteps)
+ *   noise/data affinity for the optional NOISE and DATA layers
+ *   glitch     how often the white-flash glitch accents fire
+ *   silence    how much space (mutes, gaps)
  */
 export const SOUND_STYLE = {
-  //            kickDecay  swing  clickDens sineDens sineLen noise stutter crush silence space subAmt ghost
-  DISSOLUTION: { kickDecay: 0.32, swing: 0.03, clickDens: 0.45, sineDens: 0.45, sineLen: 0.09, noise: 0.35, stutter: 0.08, crush: 0.05, silence: 0.35, space: 0.05, sub: 0.15, ghost: 0.15, kickGain: 0.75 },
-  RASTER:      { kickDecay: 0.26, swing: 0.0,  clickDens: 1.0,  sineDens: 0.55, sineLen: 0.05, noise: 0.5,  stutter: 0.15, crush: 0.15, silence: 0.08, space: 0.0,  sub: 0.1,  ghost: 0.1,  kickGain: 1.0 },
-  ORBIT:       { kickDecay: 0.55, swing: 0.02, clickDens: 0.4,  sineDens: 0.8,  sineLen: 0.6,  noise: 0.3,  stutter: 0.05, crush: 0.03, silence: 0.15, space: 0.35, sub: 0.55, ghost: 0.2,  kickGain: 0.85 },
-  TOPOGRAPHY:  { kickDecay: 0.85, swing: 0.04, clickDens: 0.35, sineDens: 0.35, sineLen: 0.3,  noise: 0.25, stutter: 0.05, crush: 0.03, silence: 0.2,  space: 0.12, sub: 1.0,  ghost: 0.1,  kickGain: 0.95 },
-  FLOW:        { kickDecay: 0.4,  swing: 0.17, clickDens: 0.75, sineDens: 0.5,  sineLen: 0.12, noise: 0.55, stutter: 0.12, crush: 0.06, silence: 0.08, space: 0.1,  sub: 0.3,  ghost: 0.55, kickGain: 0.9 },
-  MATRIX:      { kickDecay: 0.22, swing: 0.0,  clickDens: 0.9,  sineDens: 0.5,  sineLen: 0.04, noise: 0.6,  stutter: 0.75, crush: 0.6,  silence: 0.18, space: 0.0,  sub: 0.12, ghost: 0.3,  kickGain: 0.9 },
+  DISSOLUTION: { kickDecay: 0.34, swing: 0.03, clickDens: 0.45, noise: 0.35, data: 0.12, crush: 0.05, silence: 0.42, ghost: 0.1, kickGain: 0.75, glitch: 0.35, kick: [0, 8], sub: 'drone', subSteps: [], dataKind: 'stutter' },
+  RASTER:      { kickDecay: 0.26, swing: 0.0, clickDens: 1.0, noise: 0.45, data: 0.55, crush: 0.15, silence: 0.1, ghost: 0.05, kickGain: 1.0, glitch: 0.6, kick: [0, 4, 8, 12], sub: 'pulse', subSteps: [2, 6, 10, 14], dataKind: 'dial' },
+  ORBIT:       { kickDecay: 0.55, swing: 0.02, clickDens: 0.4, noise: 0.2, data: 0.4, crush: 0.03, silence: 0.22, ghost: 0.15, kickGain: 0.85, glitch: 0.45, kick: [0, 8], sub: 'drone', subSteps: [], dataKind: 'dial' },
+  TOPOGRAPHY:  { kickDecay: 0.85, swing: 0.04, clickDens: 0.35, noise: 0.42, data: 0.05, crush: 0.03, silence: 0.25, ghost: 0.1, kickGain: 0.95, glitch: 0.3, kick: [0, 10], sub: 'drone', subSteps: [], dataKind: 'stutter' },
+  FLOW:        { kickDecay: 0.4, swing: 0.16, clickDens: 0.7, noise: 0.55, data: 0.3, crush: 0.06, silence: 0.1, ghost: 0.45, kickGain: 0.9, glitch: 0.4, kick: [0, 4, 8, 12], sub: 'pulse', subSteps: [3, 6, 11, 14], dataKind: 'stutter' },
+  MATRIX:      { kickDecay: 0.22, swing: 0.0, clickDens: 0.9, noise: 0.25, data: 0.95, crush: 0.6, silence: 0.2, ghost: 0.25, kickGain: 0.9, glitch: 0.8, kick: [0, 4, 8, 12], sub: 'pulse', subSteps: [2, 3, 6, 7, 10, 11, 14, 15], dataKind: 'stutter' },
 };
 
 export function blendStyle(a, b, t) {
   const A = SOUND_STYLE[a], B = SOUND_STYLE[b], out = {};
-  for (const k in A) out[k] = lerp(A[k], B[k], t);
+  for (const k in A) out[k] = typeof A[k] === 'number' ? lerp(A[k], B[k], t) : A[k];
   return out;
 }
 
@@ -67,22 +72,11 @@ export function pieceParams(analysis, choice) {
   const bpm = Math.round((112 + clamp(f.brightness * 1.25) * 16 + rng.range(-0.8, 0.8)) * 10) / 10;
   const semis = Math.round(clamp(f.brightness) * 8 + rng.range(-1, 1));
   const root = 36.71 * Math.pow(2, semis / 12);
-  // hue → pitch set (harmonic numbers over the root, very high register)
-  const HARM_SETS = [
-    [16, 18, 24, 27, 32, 36],   // red      — open, fourths/fifths
-    [16, 20, 24, 30, 32, 40],   // orange   — major partials
-    [16, 19, 24, 28, 32, 38],   // yellow   — minor-ish
-    [16, 21, 24, 28, 32, 42],   // green    — septimal
-    [16, 17, 24, 25, 32, 34],   // cyan     — cold beating
-    [16, 24, 27, 32, 36, 48],   // blue     — hollow
-    [16, 22, 24, 33, 32, 44],   // violet   — 11th partial
-  ];
-  const harmonics = HARM_SETS[Math.floor(f.hue * HARM_SETS.length) % HARM_SETS.length];
   // one cold accent colour per photo
   const ACCENTS = [[0.45, 0.95, 1.0], [0.55, 0.78, 1.0], [0.5, 1.0, 0.86], [0.72, 0.86, 1.0], [0.35, 0.85, 0.95]];
   const accent = rng.pick(ACCENTS);
   return {
-    bpm, root, harmonics, accent,
+    bpm, root, accent,
     density: rng.range(0.75, 1.25),      // visual density multiplier
     speed: rng.range(0.7, 1.35),         // visual speed multiplier
     thickness: rng.range(0.7, 1.4),      // line thickness multiplier
