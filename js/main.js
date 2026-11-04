@@ -138,16 +138,19 @@ async function begin(src, name, signatureBytes = null) {
 
 let readoutLines = [];
 function pushReadout(html) { readoutLines.push(html); renderReadout(); }
-function renderReadout() { $('readout').innerHTML = readoutLines.join('\n'); }
+let readoutMax = 99;
+function renderReadout() { $('readout').innerHTML = readoutLines.slice(-readoutMax).join('\n'); }   // newest lines that fit
 function placeReadout() {
   const el = $('readout');
   if (!visuals.photo) return;
   const r = visuals.imageRect();
   const right = innerWidth - (r.x + r.w), below = innerHeight - (r.y + r.h);
+  const LH = 16.5;                                           // readout line height (px)
   el.classList.remove('inset');
-  if (right >= 220) { el.style.left = (r.x + r.w + 18) + 'px'; el.style.top = r.y + 'px'; }
-  else if (below >= 215) { el.style.left = r.x + 'px'; el.style.top = (r.y + r.h + 22) + 'px'; }
-  else { el.classList.add('inset'); el.style.left = (r.x + 10) + 'px'; el.style.top = (r.y + 10) + 'px'; }
+  if (right >= 220) { el.style.left = (r.x + r.w + 18) + 'px'; el.style.top = r.y + 'px'; readoutMax = Math.max(4, (innerHeight - r.y - 40) / LH | 0); }
+  else if (below >= 110) { el.style.left = r.x + 'px'; el.style.top = (r.y + r.h + 22) + 'px'; readoutMax = Math.max(3, (below - 60) / LH | 0); }
+  else { el.classList.add('inset'); el.style.left = (r.x + 10) + 'px'; el.style.top = (r.y + 10) + 'px'; readoutMax = Math.max(3, (r.h - 30) / LH | 0); } // over the photo
+  renderReadout();
 }
 const fmt = (x) => x.toFixed(2);
 function readingLines(a, st) {
