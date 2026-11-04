@@ -11,11 +11,30 @@ import { Orbit } from './orbit.js';
 import { Topography } from './topography.js';
 import { Flow } from './flow.js';
 import { MatrixWorld } from './matrix.js';
+import { Quanta } from './quanta.js';
+import { ForceField } from './field.js';
 
 const WORLD_CLASSES = { DISSOLUTION: Dissolution, RASTER: Raster, ORBIT: Orbit, TOPOGRAPHY: Topography, FLOW: Flow, MATRIX: MatrixWorld };
 
 const FOV = 30;
 const CAM_Z = 1 / Math.tan((FOV / 2) * Math.PI / 180); // z=0 plane spans y ∈ [-1, 1]
+
+// white glitch flash: full white, or Ikeda-style white bands across the screen
+const FLASH_VERT = /* glsl */`
+varying vec2 vUv;
+void main() { vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const FLASH_FRAG = /* glsl */`
+uniform float uFull, uBands, uSeed;
+varying vec2 vUv;
+float h(float p) { p = fract(p * .1031); p *= p + 33.33; p *= p + p; return fract(p); }
+void main() {
+  float row = floor(vUv.y * 140.0);
+  float grp = floor(row / (1.0 + floor(h(uSeed * 3.1) * 6.0)));            // bands of varied height
+  float band = step(0.86, h(grp * 1.37 + uSeed * 17.0));
+  float a = max(uFull, band * uBands);
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+}`;
 
 const PHOTO_VERT = /* glsl */`
 varying vec2 vP;
@@ -55,6 +74,15 @@ export class Visuals {
     this.obs = { x: 0, y: 0, s: 0, target: 0 };
     this.dprScale = 1;           // lowered automatically if frames are slow
     this.slow = 0; this.dtAvg = 1 / 60;
+    // the hand's force field (shared by every world)
+    this.field = new ForceField();
+    this.shared.uField.value = this.field.tex;
+    this.shared.uFieldRect.value = this.field.rect;
+    // white glitch flash overlay
+    this.flashMat = new THREE.ShaderMaterial({ vertexShader: FLASH_VERT, fragmentShader: FLASH_FRAG, uniforms: { uFull: { value: 0 }, uBands: { value: 0 }, uSeed: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false });
+    const fq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.flashMat); fq.frustumCulled = false; fq.renderOrder = 20;
+    this.scene.add(fq);
+    this.flash = { t0: -99, frame: 99, kind: null, seed: 0 };
     this.resize();
   }
 
@@ -79,9 +107,14 @@ export class Visuals {
     this.resize();
   }
 
-  /** After reading: build the worlds this photograph chose. */
-  beginWorlds(params, choice) {
+  /** After reading: build the worlds this photograph chose (+ its quanta from the structures). */
+  beginWorlds(params, choice, st) {
     this.params = params;
+    if (st) {
+      this.quanta = new Quanta({ shared: this.shared, analysis: this.analysis, params, quality: this.quality, st, view: this.view });
+      this.quanta.setMix(0);
+      this.scene.add(this.quanta.group);
+    }
     this.shared.uAccent.value.setRGB(...params.accent);
     this.shared.uSpeed.value = params.speed;
     this.setWorlds(choice.primary, choice.secondary, choice.accent);
@@ -91,6 +124,7 @@ export class Visuals {
     for (const k in this.worlds) { this.scene.remove(this.worlds[k].group); this.worlds[k].dispose(); }
     this.worlds = {};
     if (this.photo) { this.scene.remove(this.photo); this.photo.geometry.dispose(); this.photoMat.dispose(); this.photo = null; }
+    if (this.quanta) { this.scene.remove(this.quanta.group); this.quanta.dispose(); this.quanta = null; }
     if (this.texture) { this.texture.dispose(); this.texture = null; }
   }
 
@@ -135,6 +169,7 @@ export class Visuals {
     this.shared.uView.value.set(aspect, 1);
     this.shared.uPx.value = 2 / (H * dpr);
     this.shared.uObsR.value = W < 700 ? 0.42 : 0.32;
+    if (this.field) this.field.setView(aspect);
     for (const k in this.worlds) this.worlds[k].resize(this.view);
   }
 
@@ -172,18 +207,34 @@ export class Visuals {
     if (!this.obs.init) { this.obs.sx = wx; this.obs.sy = wy; this.obs.init = true; }
   }
 
-  /** Audio event → envelopes + a spark at its source pixel. */
+  /** The cursor cut through the piece from (x0,y0) to (x1,y1) (CSS px) during dt. */
+  force(x0, y0, x1, y1, dt) {
+    const [a, b] = this.screenToWorld(x0, y0), [c, d] = this.screenToWorld(x1, y1);
+    this.field.inject(a, b, c, d, dt, this.view.cssW < 700 ? 0.22 : 0.16);
+  }
+  screenToImage(x, y) {
+    const [wx, wy] = this.screenToWorld(x, y);
+    return [(wx / this.view.half.x + 1) / 2, (1 - wy / this.view.half.y) / 2];
+  }
+
+  /** Audio event → envelopes, white flashes, tunneling jumps, a spark at its source pixel. */
   trigger(ev) {
     const e = this.env;
     switch (ev.type) {
       case 'kick': e.kick = Math.max(e.kick, ev.vel); if (!ev.ghost) this.beat++; break;
       case 'click': e.click = Math.max(e.click, ev.vel); break;
-      case 'sine': e.sine = Math.max(e.sine, Math.min(1, ev.vel * 8)); break;
+      case 'pulse': case 'tone': e.sine = Math.max(e.sine, 0.5); break;
       case 'noise': e.noise = Math.max(e.noise, Math.min(1, ev.vel * 2.2)); break;
-      case 'stutter': e.noise = Math.max(e.noise, 0.6); e.click = Math.max(e.click, 0.7); break;
+      case 'data': e.noise = Math.max(e.noise, 0.6); e.click = Math.max(e.click, 0.7); this.shared.uJump.value++; break;
+      case 'glitch':
+        e.click = 1; e.noise = Math.max(e.noise, 0.8); this.shared.uJump.value++;
+        // one glitch sound → one white flash (full white on accents, white bands otherwise)
+        this.flash = { t0: this.time, frame: 0, kind: ev.big ? 'big' : ev.vel >= 0.85 ? 'full' : 'bands', seed: Math.random() * 100 };
+        break;
     }
+    this.quanta?.onEvent(ev, this.time);
     if (ev.x !== undefined && ev.type !== 'sub' && ev.type !== 'kick') {
-      const kind = { click: 1, sine: 2, noise: 3, stutter: 4 }[ev.type] || 1;
+      const kind = { click: 1, glitch: 1, noise: 3, data: 4 }[ev.type] || 1;
       const [ix, iy] = toImg(ev.x, ev.y);
       this.shared.uSparks.value[this.sparkIdx].set(ix, iy, this.time, kind);
       this.sparkIdx = (this.sparkIdx + 1) % 8;
@@ -206,6 +257,14 @@ export class Visuals {
     U.uBeat.value = this.beat; U.uStep.value = s.stepF || 0;
     U.uEnergy.value = s.energy; U.uBreak.value = s.brk;
     U.uForm.value = s.form; U.uCohere.value = s.cohere;
+    this.field.step(dt);
+    // white flash: counted in rendered FRAMES (never missed on a slow frame); the collapse flash lingers
+    const fl = this.flash, F = this.flashMat.uniforms, n = fl.frame === undefined ? 99 : fl.frame++;
+    F.uSeed.value = fl.seed + n * 0.37;
+    const FULL = { big: [1, 1, 1, 0.8, 0, 0.6, 0.45, 0, 0.3, 0.2, 0, 0.1], full: [1, 1, 0, 0.5], bands: [] }[fl.kind] || [];
+    const BANDS = { big: 18, full: 4, bands: 2 }[fl.kind] || 0;
+    F.uFull.value = n < FULL.length ? FULL[n] : 0;
+    F.uBands.value = n < BANDS ? (fl.kind === 'bands' && n === 1 ? 0.6 : 0.95) : 0;
 
     // observer: smooth position + strength (collapses fast, dissolves slowly)
     const o = this.obs;
@@ -232,6 +291,7 @@ export class Visuals {
         this.scene.remove(w.group); w.dispose(); delete this.worlds[k];
       }
     }
+    if (this.quanta) { this.quanta.setMix(s.intro >= 1 && s.energy > 0 ? fade : 0); }
     this.renderer.render(this.scene, this.camera);
   }
 }

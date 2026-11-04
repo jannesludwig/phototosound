@@ -4,6 +4,7 @@
 //  and draws the thin 2D overlay (scan line, read-head, observer).
 // ─────────────────────────────────────────────────────────────
 import { analyzeImage, rasterize } from './analysis.js';
+import { extractStructures } from './structures.js';
 import { preloadFaceDetector, detectFace } from './face.js';
 import { chooseWorlds, pieceParams, WORLDS } from './worlds.js';
 import { Composer, readWindow, STEPS, LAYERS } from './audio/composer.js';
@@ -108,7 +109,9 @@ async function begin(src, name, signatureBytes = null) {
   placeReadout();
   readoutLines = []; renderReadout();
 
-  // face detection runs on a ≤640px copy while the scan line passes
+  // the photo's own contours (for the quanta + edge clicks) and face detection, while the scan line passes
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  app.st = extractStructures(texCanvas, analysis.seed);
   const faceCanvas = rasterize(src, 640);
   const [face] = await Promise.all([detectFace(faceCanvas), wait(app.readDur * 1000)]);
   if (gen !== app.generation) return;
@@ -131,7 +134,7 @@ async function begin(src, name, signatureBytes = null) {
 
   app.composer = new Composer(analysis, params, choice.primary, choice.secondary, choice.accent);
   audio.loadPiece(app.composer, analysis, params);
-  visuals.beginWorlds(params, choice);
+  visuals.beginWorlds(params, choice, app.st);
 
   if (!audio.running) {           // dropped without a gesture (or iOS) → ask for one tap
     const ok = await audio.unlock();
@@ -188,31 +191,60 @@ function readingLines(a) {
 }
 
 // ── observation + UI visibility ────────────────────────────
-let uiTimer = 0, obsTimer = 0;
+let uiTimer = 0;
 function showUI() {
   body.classList.add('ui');
   clearTimeout(uiTimer);
   uiTimer = setTimeout(() => { if (!$('controls').matches(':hover') && $('worlds').hidden) body.classList.remove('ui'); }, 2600);
 }
-function onPointer(e, active) {
-  app.pointer.x = e.clientX; app.pointer.y = e.clientY; app.pointer.touch = e.pointerType !== 'mouse';
-  if (app.state !== 'playing') return;
-  if (e.target.closest && e.target.closest('#controls, .corner')) { visuals.observe(e.clientX, e.clientY, false); return; }
-  visuals.observe(e.clientX, e.clientY, active);
-  app.pointer.active = active;
-  clearTimeout(obsTimer);
-  // mouse: observation lasts while moving; touch: while touching
-  if (active && e.pointerType === 'mouse') obsTimer = setTimeout(() => { visuals.observe(app.pointer.x, app.pointer.y, false); app.pointer.active = false; }, 900);
+// The hand: moving cuts through the piece (force field + a click when crossing a strong
+// edge of the photo); a still press (~380 ms) collapses the area back to the photograph.
+let holdTimer = 0;
+const onUI = (e) => e.target.closest && e.target.closest('#controls, .corner, #mixer');
+function move(e) {
+  const P = app.pointer, now = performance.now();
+  const dt = Math.max(0.001, (now - (P.lt || 0)) / 1000);
+  const x = e.clientX, y = e.clientY;
+  if (app.state === 'playing' && !onUI(e) && P.lt && dt < 0.2) {
+    visuals.force(P.lx, P.ly, x, y, dt);
+    edgeCrossing(P.lx, P.ly, x, y);
+    P.moved = (P.moved || 0) + Math.hypot(x - P.lx, y - P.ly);
+    if (P.moved > 14 && holdTimer && !P.holding) { clearTimeout(holdTimer); holdTimer = 0; }
+    if (P.holding) visuals.observe(x, y, true);
+  }
+  P.lx = x; P.ly = y; P.lt = now; P.x = x; P.y = y;
 }
-addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons) onPointer(e, true); if (e.pointerType === 'mouse') showUI(); }, { passive: true });
+function edgeCrossing(x0, y0, x1, y1) {
+  const st = app.st; if (!st) return;
+  const steps = Math.min(24, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 4));
+  let prev = null;
+  for (let k = 0; k <= steps; k++) {
+    const [ix, iy] = visuals.screenToImage(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps);
+    if (ix < 0 || iy < 0 || ix >= 1 || iy >= 1) continue;
+    const m = st.edgeMag[Math.floor(iy * st.edgeH) * st.edgeW + Math.floor(ix * st.edgeW)];
+    const on = m > 0.35;
+    if (prev === false && on) { audio.edgeClick(ix, m); break; }
+    prev = on;
+  }
+}
+function release() {
+  const P = app.pointer; P.holding = false;
+  clearTimeout(holdTimer); holdTimer = 0;
+  visuals.observe(P.x || 0, P.y || 0, false);
+}
+addEventListener('pointermove', (e) => { move(e); if (e.pointerType === 'mouse') showUI(); }, { passive: true });
 addEventListener('pointerdown', (e) => {
   if (!app.paused) audio.unlock();     // first tap unlocks audio (iOS) — but never un-pauses
   if (app.awaitTap) { const r = app.awaitTap; app.awaitTap = null; r(); }
-  onPointer(e, true); showUI();
+  const P = app.pointer; P.moved = 0; P.lx = P.x = e.clientX; P.ly = P.y = e.clientY; P.lt = performance.now();
+  showUI();
+  if (app.state !== 'playing' || onUI(e)) return;
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => { holdTimer = 0; P.holding = true; visuals.observe(P.x, P.y, true); }, 380);
 });
-addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') onPointer(e, false); });
-addEventListener('pointercancel', (e) => onPointer(e, false));
-document.addEventListener('mouseleave', () => visuals.observe(app.pointer.x, app.pointer.y, false));
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+document.addEventListener('mouseleave', () => { release(); app.pointer.lt = 0; });
 addEventListener('keydown', (e) => {
   if (app.state !== 'playing') return;
   if (e.code === 'Space') { e.preventDefault(); togglePause(); }

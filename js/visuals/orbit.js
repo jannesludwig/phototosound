@@ -32,7 +32,7 @@ float ringLine(float k, float px) {
 }
 
 void main() {
-  vec2 w = vW;
+  vec2 w = vW - fieldAt(vW);          // rings bend around the hand
   vec2 pImg = w / uHalf;
   float coh = coherence(pImg);
   float free = 1.0 - coh;
@@ -108,11 +108,14 @@ varying float vA;
 void main() {
   vec4 C = uCenters[int(aOrbit.x)];
   vec2 c = C.xy * uHalf;
-  float r = aOrbit.y * (1.0 + uKick * 0.06 * (1.0 - aSeed));
+  // quantum jumps between orbits: on each kick some particles change ring (no transition)
+  float lvl = floor((hash11(aSeed * 13.1 + uBeat) - 0.5) * 2.999) * step(0.82, hash11(aSeed * 3.7 + uBeat * 0.71));
+  float r = (aOrbit.y + lvl * C.w) * (1.0 + uKick * 0.06 * (1.0 - aSeed));
   // Kepler-ish: angular speed ∝ r^-1.5
   float om = aOrbit.w * 0.035 * uSpeed / pow(max(r, 0.02), 1.5) * 0.12;
   float a = aOrbit.z + uTime * om;
   vec2 p = c + vec2(cos(a), sin(a) * mix(1.0, 0.82, aSeed)) * r;
+  p += fieldAt(p) * 2.2;               // knocked out of orbit, swings back
   vec2 pImg = p / uHalf;
   float coh = coherence(pImg);
   vec3 pc = photo(pImg);
@@ -209,7 +212,7 @@ export class Orbit extends World {
       const c = this.centres[(this.rippleIdx) % this.count];
       this.ripples[this.rippleIdx % MAXR].set(c.x, c.y, time, ev.vel);
       this.rippleIdx++;
-    } else if (ev.type === 'sine' && ev.long) {
+    } else if (ev.type === 'glitch' && ev.x !== undefined) {
       const [x, y] = toImg(ev.x, ev.y);
       this.ripples[this.rippleIdx % MAXR].set(x, y, time, 0.35);
       this.rippleIdx++;

@@ -21,7 +21,8 @@ void main() {
   float l = luma(pc);
   vCol = mix(pc * 1.9 + 0.08, uAccent, 0.5 * step(0.96, fract(position.z * 97.13)));
   vA = aAlpha * uMix * (1.0 - coh) * (0.4 + 0.6 * smoothstep(0.02, 0.4, l)) * (0.8 + uKick * 0.6);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xy, 0.0, 1.0);  // (z = id, not depth)
+  vec2 w = position.xy + fieldAt(position.xy) * 1.4;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(w, 0.0, 1.0);  // (z = id, not depth)
 }`;
 const FRAG = /* glsl */`
 varying vec3 vCol;
@@ -83,6 +84,17 @@ export class Flow extends World {
     const i00 = y0 * F.w + x0, i10 = i00 + 1, i01 = i00 + F.w, i11 = i01 + 1;
     out[0] = (F.fx[i00] * (1 - tx) + F.fx[i10] * tx) * (1 - ty) + (F.fx[i01] * (1 - tx) + F.fx[i11] * tx) * ty;
     out[1] = (F.fy[i00] * (1 - tx) + F.fy[i10] * tx) * (1 - ty) + (F.fy[i01] * (1 - tx) + F.fy[i11] * tx) * ty;
+  }
+
+  /** Tunneling: on glitch / data events a few streaks jump far along their field line. */
+  onEvent(ev) {
+    if (ev.type !== 'glitch' && ev.type !== 'data') return;
+    const v = [0, 0];
+    for (let k = 0; k < this.n * 0.04; k++) {
+      const i = Math.floor(this.rng() * this.n);
+      this.sample(this.x[i], this.y[i], v);
+      this.x[i] += v[0] * 0.18; this.y[i] += v[1] * 0.18;
+    }
   }
 
   update(s) {

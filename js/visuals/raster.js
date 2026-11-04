@@ -34,6 +34,8 @@ void main() {
   float v = vc + vY * 2.0 / uRows;
   vec2 pImg = toImg(clamp(vU, -1.0, 1.0), v);
   float coh = coherence(toImg(vU, v));
+  vec2 fd = fieldAt(toImg(vU, v) * uHalf) / uHalf;              // rows bend around the hand
+  float uB = vU - (uVert > 0.5 ? -fd.y : fd.x) * 1.4;
   float free = 1.0 - coh;
 
   float beat = uBeat;
@@ -45,7 +47,7 @@ void main() {
   float shift = moving * (floor((hash21(vec2(grp * 1.7, beat + 3.1)) - 0.5) * 12.0) / 16.0);
   shift += (hash21(vec2(grp, 11.0)) - 0.5) * 0.04 * uEnergy;      // permanent misregistration
   shift *= free;
-  float u = vU - shift;
+  float u = uB - shift;
   float inside = step(abs(u), 1.0);
 
   // ── pixelation along the row (some rows, re-rolled every bar)
@@ -65,7 +67,7 @@ void main() {
   // ── data stripes: luminance → binary bars, running across the whole screen
   float isData = step(0.955 - 0.05 * uEnergy - 0.04 * uBreak, hash21(vec2(row * 3.3, floor(beat / 2.0))));
   float cells = 48.0 + floor(hash21(vec2(row, 2.0)) * 4.0) * 32.0;
-  float du = vU * 0.5 + 0.5 + floor(beat) * 0.0625 * (hash21(vec2(row, 9.0)) - 0.5);
+  float du = uB * 0.5 + 0.5 + floor(beat) * 0.0625 * (hash21(vec2(row, 9.0)) - 0.5);
   float cell = floor(du * cells);
   float bit = step(0.5, luma(photo(toImg(fract(cell / cells) * 2.0 - 1.0, vc))) + (hash21(vec2(cell, row)) - 0.5) * 0.3);
   float thin = step(0.35, fract(du * cells));                        // gap between bars

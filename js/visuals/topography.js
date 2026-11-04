@@ -32,6 +32,7 @@ void main() {
   }
   z *= free;
   vec3 pos = vec3(p * uHalf, z);
+  pos.xy += fieldAt(pos.xy);
   // slow yaw, then tilt the terrain away from the viewer
   float yaw = uYaw * free;
   pos.xy = mat2(cos(yaw), sin(yaw), -sin(yaw), cos(yaw)) * pos.xy;
