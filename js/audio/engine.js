@@ -149,7 +149,7 @@ export class AudioEngine {
   buildBuses() {
     const ctx = this.ctx;
     const G = (v) => { const g = ctx.createGain(); g.gain.value = v; return g; };
-    const out = this.pieceOut = G(0.9); out.connect(this.master);
+    const out = this.pieceOut = G(0.72); out.connect(this.master);
     this.bus = {};
     this.bus.drums = G(0.95); this.bus.drums.connect(out);
     // bass: mono, ducked, low-passed, saturated
@@ -160,7 +160,7 @@ export class AudioEngine {
     // pads: HP 140, cursor-swept LP, ducked, reverb send
     this.duckPad = G(1); const padHP = ctx.createBiquadFilter(); padHP.type = 'highpass'; padHP.frequency.value = 140;
     this.padLP = ctx.createBiquadFilter(); this.padLP.type = 'lowpass'; this.padLP.frequency.value = 1400; this.padLP.Q.value = 0.9;
-    this.bus.pad = G(0.75); this.bus.pad.connect(padHP); padHP.connect(this.padLP); this.padLP.connect(this.duckPad); this.duckPad.connect(out);
+    this.bus.pad = G(1.0); this.bus.pad.connect(padHP); padHP.connect(this.padLP); this.padLP.connect(this.duckPad); this.duckPad.connect(out);
     const padSend = G(0.5); this.padLP.connect(padSend); padSend.connect(this.reverbIn);
     // textures: HP 300, ducked, same cursor LP
     this.duckTex = G(1); const texHP = ctx.createBiquadFilter(); texHP.type = 'highpass'; texHP.frequency.value = 300;
@@ -395,7 +395,7 @@ export class AudioEngine {
       for (const [type, det, pan] of [[ev.warm > 0.55 ? 'triangle' : 'sawtooth', -7, -0.45], ['sawtooth', 6, 0.45]]) {
         const o = ctx.createOscillator(), og = ctx.createGain();
         o.type = type; o.frequency.setValueAtTime(f, t); o.detune.setValueAtTime(det + (k % 2 ? 3 : -3), t);
-        og.gain.value = 0.22 / ev.freqs.length * (type === 'triangle' ? 1.6 : 1);
+        og.gain.value = 0.62 / ev.freqs.length * (type === 'triangle' ? 1.6 : 1);
         o.connect(og); og.connect(this.pan(pan * (k % 2 ? 1 : 0.6), lp));
         o.start(t); o.stop(t + dur + 1.3);
       }

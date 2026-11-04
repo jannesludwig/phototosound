@@ -395,7 +395,7 @@ function barEvents(P, n) {
     const ci = Math.floor(sb / (si === 4 ? 2 : 4) + pl.p) % P.chords.length;
     const freqs = P.chords[ci].map((s) => P.root * Math.pow(2, s / 12));
     const cl = st.regions.clusters[ci % st.regions.clusters.length];
-    push(0, 'pad', { freqs, dur: si === 4 ? 2 : 4, vel: (si === 4 ? 0.16 : 0.09) * (0.6 + A.pad * 0.6), cutoff: si === 4 ? 650 + 300 * P.mood.warmth : 380 + 600 * T, cluster: ci, x: cl ? cl.x : 0.5, y: cl ? cl.y : 0.5, warm: P.mood.warmth });
+    push(0, 'pad', { freqs, dur: si === 4 ? 2 : 4, vel: (si === 4 ? 0.3 : 0.14) * (0.6 + A.pad * 0.6), cutoff: si === 4 ? 650 + 300 * P.mood.warmth : 380 + 600 * T, cluster: ci, x: cl ? cl.x : 0.5, y: cl ? cl.y : 0.5, warm: P.mood.warmth });
   }
   if (si === 4 && sb % 2 === 1 && P.has.sub) push(0, 'sub', { freq: P.root * (sb % 4 === 1 ? 1 : 1.5), dur: 1, vel: 0.14 });
 
