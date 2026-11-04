@@ -41,12 +41,12 @@ export const SPECTRUM_SOUND = {
   DISSOLUTION: { clickDens: 0.45, noise: 0.35, data: 0.12, field: 0.1, crush: 0.05, swing: 0.03, silence: 0.45, glitch: 0.3, sub: 'drone', subSteps: [], dataKind: 'stutter' },
 };
 
-export function planJourney(analysis, map) {
+export function planJourney(analysis, map, force = null) {
   const f = analysis.features, rng = makeRng(analysis.seed ^ 0x7a11);
   const weights = spectraWeights(f, rng);
   const ranked = SPECTRA.slice().sort((a, b) => weights[b] - weights[a]);
   const n = weights[ranked[2]] > 0.6 * weights[ranked[0]] || rng() < 0.25 ? 3 : 2;
-  const chosen = ranked.slice(0, n);
+  const chosen = force && force.length ? force.filter((x) => SPECTRA.includes(x)) : ranked.slice(0, n);
   const spectra = SPECTRA.filter((s) => chosen.includes(s));                // order → chaos
 
   // act lengths (bars)
@@ -88,8 +88,8 @@ export function planJourney(analysis, map) {
   const P = map.params;
   const params = {
     bpm: P.bpm, root: P.root, accent,
-    density: rng.range(0.75, 1.2), speed: rng.range(0.7, 1.25), thickness: rng.range(0.7, 1.3),
-    rasterRows: rng.int(70, 170), rasterFill: rng.range(0.35, 0.85), rasterGroup: rng.int(1, 8),
+    density: rng.range(0.75, 1.2), speed: rng.range(0.7, 1.25), thickness: rng.range(0.6, 1.0),
+    rasterRows: rng.int(90, 190), rasterFill: rng.range(0.14, 0.38), rasterGroup: rng.int(1, 8),   // thinner lines than v1: decomposed, never intact
     matrixCols: rng.int(36, 72), contourLevels: rng.int(14, 34), orbitRings: rng.range(0.035, 0.08), variant: rng(),
     entropyDrift: [Math.cos(rng() * 6.283), Math.sin(rng() * 6.283)].map((v) => v * rng.range(0.02, 0.06)),
   };
