@@ -43,10 +43,12 @@ export async function detectFace(canvas, timeout = 7000) {
       score: d.categories?.[0]?.score ?? 0,
       x: d.boundingBox.originX / W, y: d.boundingBox.originY / H,
       w: d.boundingBox.width / W, h: d.boundingBox.height / H,
+      // keypoints (normalised): right eye, left eye, nose tip, mouth, right ear, left ear
+      keypoints: (d.keypoints || []).map((k) => ({ x: k.x > 1 ? k.x / W : k.x, y: k.y > 1 ? k.y / H : k.y })),
     })).filter((f) => f.score > 0.45).sort((a, b) => b.w * b.h - a.w * a.h);
     if (!faces.length) return none;
     const f = faces[0];
-    return { face: f.score, faceSize: Math.min(1, f.w * f.h), faceBox: { x: f.x, y: f.y, w: f.w, h: f.h }, faces };
+    return { face: f.score, faceSize: Math.min(1, f.w * f.h), faceBox: { x: f.x, y: f.y, w: f.w, h: f.h }, faceKeypoints: f.keypoints, faces };
   } catch (e) {
     console.warn('[face] detection failed:', e);
     return none;

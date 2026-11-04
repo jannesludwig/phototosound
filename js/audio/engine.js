@@ -37,6 +37,7 @@ export class AudioEngine {
     this.events = [];
     this.volume = 0.8;
     this.mute = {}; this.solo = {};          // mixer state survives new photos
+    this.loopMode = false;                    // default: the piece runs once and ends
     this.lastHit = {};                        // layer → last audio time it played
     this.ticker = makeTicker(() => this.tick());
   }
@@ -103,7 +104,7 @@ export class AudioEngine {
     }
     this.stepDur = 60 / params.bpm / 4;
     this.barDur = this.stepDur * STEPS;
-    this.swing = composer.S.swing;
+    this.swing = params.swing || 0;
   }
 
   /** One bus per layer: gain (mixer) → analyser (meter) → piece gain. */
@@ -159,6 +160,7 @@ export class AudioEngine {
     this.nextStep = startBar * STEPS;
     this.events = [];
     this.lastHit = {};
+    this.finished = false;
     this.playing = true;
     this.ticker.start();
     this.tick();
@@ -204,6 +206,7 @@ export class AudioEngine {
       const tStep = this.startTime + this.nextStep * this.stepDur;
       if (tStep >= horizon) break;
       const bar = Math.floor(this.nextStep / STEPS), stepInBar = this.nextStep % STEPS;
+      if (!this.loopMode && bar >= this.composer.loopBars) { this.finished = true; break; }   // one shot: the piece is over
       const evs = this.composer.bar(bar);
       const barStart = this.startTime + bar * this.barDur;
       for (const ev of evs) {
@@ -360,6 +363,58 @@ export class AudioEngine {
     const slab = ev.big ? 0.06 : 0.02;
     ng.gain.setValueAtTime(ev.vel * (ev.big ? 0.45 : 0.3), t); ng.gain.setValueAtTime(0, t + slab);
     ns.connect(hp); hp.connect(ng); ng.connect(p); ns.start(t, rng() * 1.5, slab + 0.01);
+  }
+
+  /** HUM — the machine hum of the map: three faint low sine partials, breathing slowly. */
+  v_hum(t, ev, out) {
+    const ctx = this.ctx, dur = ev.dur * this.barDur, g = ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(ev.vel, t + Math.min(2.5, dur * 0.4));
+    g.gain.setValueAtTime(ev.vel, t + dur * 0.75); g.gain.linearRampToValueAtTime(0, t + dur + 0.6);
+    const am = ctx.createGain(); am.gain.value = 1; am.connect(g); g.connect(out);
+    const lfo = ctx.createOscillator(), lg = ctx.createGain();
+    lfo.frequency.value = 0.11 + (ev.freq % 7) * 0.02; lg.gain.value = 0.35; lfo.connect(lg); lg.connect(am.gain);
+    [[1, 1], [2, 0.32], [3, 0.12]].forEach(([k, a]) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = ev.freq * k; og.gain.value = a;
+      o.connect(og); og.connect(am); o.start(t); o.stop(t + dur + 0.7);
+    });
+    lfo.start(t); lfo.stop(t + dur + 0.7);
+  }
+
+  /** RESONANCE — a valley rings: a slow low/mid sine and a twin 0.6 Hz away (beating), never a blip. */
+  v_res(t, ev, out) {
+    const ctx = this.ctx, dur = ev.dur * this.barDur, g = ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(ev.vel, t + dur * 0.45); g.gain.linearRampToValueAtTime(0, t + dur);
+    g.connect(this.panner((ev.x || 0.5) * 1.2 - 0.6, out));
+    for (const d of [0, 0.6]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = Math.min(420, ev.freq) + d; o.connect(g); o.start(t); o.stop(t + dur + 0.05); }
+  }
+
+  /** TRANSMISSION — the scanned column sent as data: soft FSK in the low-mid range, low-passed. */
+  v_transmission(t, ev, out) {
+    const ctx = this.ctx, o = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+    const f0 = 330, f1 = 495, baud = 0.028;
+    o.type = 'triangle';
+    ev.bits.forEach((b, k) => o.frequency.setValueAtTime(b ? f1 : f0, t + k * baud));
+    const dur = ev.bits.length * baud;
+    lp.type = 'lowpass'; lp.frequency.value = 900;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(ev.vel, t + 0.01);
+    g.gain.setValueAtTime(ev.vel, t + dur - 0.01); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(lp); lp.connect(g); g.connect(this.panner(ev.pan, out));
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  /** CRASH — the end: the image is consumed. Click cluster + crushed data slab + noise + a deep sub drop. */
+  v_crash(t, ev, out, L) {
+    const ctx = this.ctx;
+    this.v_glitch(t, { big: true, vel: 1, pan: 0, row: 16 }, out, L);
+    const ns = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), ng = ctx.createGain();
+    ns.buffer = this.noiseBuf; lp.type = 'lowpass'; lp.frequency.setValueAtTime(8000, t); lp.frequency.exponentialRampToValueAtTime(200, t + 0.4);
+    ng.gain.setValueAtTime(0.5, t); ng.gain.setValueAtTime(0.5, t + 0.12); ng.gain.linearRampToValueAtTime(0, t + 0.45);
+    ns.connect(lp); lp.connect(ng); ng.connect(out); ns.start(t, 0.2, 0.5);
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(24, t + 2.2);
+    og.gain.setValueAtTime(0, t); og.gain.linearRampToValueAtTime(0.9, t + 0.004); og.gain.setTargetAtTime(0, t + 0.1, 0.6);
+    o.connect(og); og.connect(out); o.start(t); o.stop(t + 3);
   }
 
   /** TONE — one very low, soft sine interval (no attack transient), once. */
