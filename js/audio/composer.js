@@ -1,271 +1,229 @@
 // ─────────────────────────────────────────────────────────────
-//  composer.js — the image becomes a deterministic, minimal score.
+//  composer.js — the sound map is listened to.
 //
-//  Round 3: built on the v1 composer (image grid scan, Euclidean
-//  patterns, per-world styles). Reduced to the most basic materials:
-//  sine kick, sub, clicks, gated noise, data/transmission bursts and
-//  the white-flash glitch. No pitched blips, no melodies.
-//
-//  Layers (names used by the mixer):
-//    KICK    sine kick with pitch envelope (+ rare ghost kicks)
-//    SUB     clean sub sine: slow drone or gated sub pulses
-//    CLICK   the v1 click palette (Euclidean, from image columns)
-//    NOISE   short gated band-passed noise bursts          (optional per image)
-//    DATA    image rows as data stutters / dial pulses     (optional per image)
-//    GLITCH  white flash + digital glitch (structural accents)
-//    TONE    one very low, soft sine interval, once, after the intense moment
-//
-//  Hypnotic: patterns are fixed per 4-bar phrase; each bar changes at most
-//  one detail. Arc: INTRO → BUILD → PEAK (glitch storm, collapse) → FALL →
-//  SILENCE, built by adding/removing a few layers. ≤ 5 layers at once.
-//
-//  Grid: 64 × 32 cells. Each phrase the sequencer reads a band of 8 rows;
-//  the 16 steps read 16 columns across the full width; the band scans
-//  top → bottom over the loop. columns → steps, x → stereo pan.
+//  Round 4: a long experimental piece, not a track. A scan line
+//  crosses the terrain (map.js); what lies beneath it at each 16th
+//  step decides what sounds:
+//    hard edge      → CLICK (the hardest → GLITCH, a local flare)
+//    high ridge     → KICK  (pressure, irregular — never 4/4)
+//    rough texture  → NOISE (short gated bursts; particles break off)
+//    valley / flat  → space, RESONANCE (slow low sines)
+//    focal point    → SUB swell (the orbit breathes)
+//    reading        → TRANSMISSION (the column read as data), DATA
+//  Arc (≈ 3–3.5 min, one shot by default):
+//    MAPPING     the scan maps the terrain for the first time; no beat
+//    LISTENING   slow; hum, resonances, rare kicks on ridges
+//    INTENSIFY   denser; irregular kicks, sub pulses, glitches, slicing
+//    CONSUMPTION the image is consumed; the beat leaves; one low tone
+//    END         the crash (the only full-screen flash), then nothing
+//  Same palette as round 3 (sine sub/kick, clicks, gated noise,
+//  data/transmission, glitch) — no pitched blips, no bright tones.
 // ─────────────────────────────────────────────────────────────
 import { makeRng, hashInts, euclid, clamp } from '../rng.js';
-import { blendStyle } from '../worlds.js';
+import { GC } from '../map.js';
 
 export const STEPS = 16;
-export const BAND = 8;
-export const LAYERS = ['KICK', 'SUB', 'CLICK', 'NOISE', 'DATA', 'GLITCH', 'TONE'];
-export const MAX_LAYERS = 5;
-const PRIORITY = ['KICK', 'SUB', 'CLICK', 'GLITCH', 'DATA', 'NOISE', 'TONE'];
-const LAYER_OF = { kick: 'KICK', sub: 'SUB', pulse: 'SUB', click: 'CLICK', noise: 'NOISE', data: 'DATA', glitch: 'GLITCH', tone: 'TONE' };
+export const LAYERS = ['KICK', 'SUB', 'PULSE', 'HUM', 'RESONANCE', 'CLICK', 'NOISE', 'DATA', 'TRANSMISSION', 'GLITCH', 'TONE', 'CRASH'];
+const LAYER_OF = { kick: 'KICK', sub: 'SUB', pulse: 'PULSE', hum: 'HUM', res: 'RESONANCE', click: 'CLICK', noise: 'NOISE', data: 'DATA', transmission: 'TRANSMISSION', glitch: 'GLITCH', tone: 'TONE', crash: 'CRASH' };
 export const layerOf = (type) => LAYER_OF[type];
+export const MAX_LAYERS = 6;
+const PRIORITY = ['CRASH', 'SUB', 'KICK', 'GLITCH', 'CLICK', 'HUM', 'PULSE', 'TRANSMISSION', 'DATA', 'NOISE', 'RESONANCE', 'TONE'];
 
-export const ENERGY = { INTRO: 0.25, BUILD: 0.6, PEAK: 1, FALL: 0.35, SILENCE: 0.08 };
-
-/** Sequencer read position for a loop bar (v1). */
-export function readWindow(loopBar, grid, loopBars) {
-  const band = Math.floor(loopBar / loopBars * (grid.rows - BAND + 1));
-  const phase = Math.floor(loopBar / 4) % (grid.cols / STEPS);
-  const cols = []; for (let i = 0; i < STEPS; i++) cols.push(i * (grid.cols / STEPS) + phase);
-  return { band, phase, cols };
-}
+// scan speed per section, in sweeps per bar (the first sweep maps the whole terrain)
+const ENERGY = { MAPPING: 0.15, LISTENING: 0.4, INTENSIFY: 0.9, CONSUMPTION: 0.35, END: 0 };
 
 export class Composer {
-  constructor(analysis, params, primary, secondary, accent) {
-    this.a = analysis;
-    this.f = analysis.features;
-    this.grid = analysis.grid;
-    this.params = params;
+  constructor(analysis, map) {
+    this.a = analysis; this.f = analysis.features; this.map = map; this.P = map.params;
     this.seed = analysis.seed;
-    this.setWorlds(primary, secondary, accent);
-  }
-
-  setWorlds(primary, secondary, accent = 0.3) {
-    this.primary = primary; this.secondary = secondary; this.accent = accent;
-    this.S = blendStyle(primary, secondary, accent * 0.4);
     this.planArc();
-    this.chooseLayers();
-    this.cache = new Map();
   }
 
-  /** Section lengths vary per image (bars, multiples of 4). */
   planArc() {
-    const f = this.f, S = this.S, rng = makeRng(this.seed ^ 0xa4c);
-    const dark = clamp(1 - f.brightness * 1.8);
-    // ≈ 88 bars (≈ 3 min at 116–124 BPM); each image shifts the weight between sections
+    const f = this.f, rng = makeRng(this.seed ^ 0x4a7c);
     const len = {
-      INTRO: 16 + 4 * Math.round(dark * 0.8 + S.silence * 0.6),
-      BUILD: 28 + 4 * Math.round(f.edgeDensity + rng() * 0.6),
-      PEAK: 16 + 4 * Math.round(f.contrast * 1.5 + rng() * 0.4),
-      FALL: 12 + 4 * Math.round(S.silence + (f.face > 0 ? 1 : 0) * 0.6),
-      SILENCE: 8,
+      MAPPING: 14 + 2 * Math.round(rng() * 2 + (1 - f.brightness)),
+      LISTENING: 20 + 4 * Math.round(this.P.smooth + rng() * 0.6),
+      INTENSIFY: 20 + 4 * Math.round(f.edgeDensity * 1.5 + rng() * 0.6),
+      CONSUMPTION: 14 + 2 * Math.round(rng() * 2 + (f.face > 0 ? 1 : 0)),
+      END: 3,
     };
-    this.sections = [];
-    let start = 0;
-    for (const name of ['INTRO', 'BUILD', 'PEAK', 'FALL', 'SILENCE']) { this.sections.push({ name, start, bars: len[name], energy: ENERGY[name] }); start += len[name]; }
+    this.sections = []; let start = 0;
+    for (const name of ['MAPPING', 'LISTENING', 'INTENSIFY', 'CONSUMPTION', 'END']) { this.sections.push({ name, start, bars: len[name], energy: ENERGY[name] }); start += len[name]; }
     this.loopBars = start;
-    this.collapseBar = this.sections[2].start + this.sections[2].bars - 1;   // the one intense moment
-    this.fallStart = this.sections[3].start;
+    this.endBar = this.sections[4].start;
+    // scan: sweeps per bar in each section; phases accumulate so the line never jumps
+    const rate = { MAPPING: 1 / (len.MAPPING - 2), LISTENING: 1 / 8, INTENSIFY: 1 / (4 + Math.round(rng() * 2)), CONSUMPTION: 1 / 6, END: 0 };
+    let ph = 0;
+    for (const s of this.sections) { s.rate = rate[s.name]; s.phase0 = ph; ph += s.rate * s.bars; }
+    // slicing: rare, at the strongest moments (two in INTENSIFY, one at the start of CONSUMPTION)
+    const I = this.sections[2];
+    this.sliceBars = new Set([I.start + Math.floor(I.bars * 0.55), I.start + I.bars - 2, this.sections[3].start]);
   }
-
-  /** Which optional layers exist for this photo: none, one or both of NOISE / DATA. */
-  chooseLayers() {
-    const f = this.f, S = this.S;
-    const noiseAmt = S.noise * (0.45 + f.saturation * 1.2);
-    const dataAmt = S.data * (0.45 + f.edgeDensity + f.graphic * 0.5);
-    this.layerSet = ['KICK', 'SUB', 'CLICK', 'GLITCH'];
-    if (dataAmt > 0.3) this.layerSet.push('DATA');
-    if (noiseAmt > 0.3) this.layerSet.push('NOISE');
-    this.layerSet.push('TONE');
-    this.amounts = { noise: noiseAmt, data: dataAmt };
-  }
-  has(layer) { return this.layerSet.includes(layer); }
 
   sectionAt(loopBar) {
-    for (let i = this.sections.length - 1; i >= 0; i--) {
-      const s = this.sections[i];
-      if (loopBar >= s.start) return { index: i, ...s, barInSection: loopBar - s.start };
-    }
+    for (let i = this.sections.length - 1; i >= 0; i--) { const s = this.sections[i]; if (loopBar >= s.start) return { index: i, ...s, barInSection: loopBar - s.start }; }
     return { index: 0, ...this.sections[0], barInSection: 0 };
   }
 
-  /** Column statistics of the read window (v1). */
-  columnStats(loopBar) {
-    const g = this.grid, { band, cols } = readWindow(loopBar, g, this.loopBars);
-    return cols.map((c) => {
-      let sl = 0, se = 0, ss = 0, peak = -1, peakRow = 0, edgeRow = 0, edgeMax = -1;
-      for (let r = 0; r < BAND; r++) {
-        const i = (band + r) * g.cols + c;
-        sl += g.lum[i]; se += g.edge[i]; ss += g.sat[i];
-        if (g.lum[i] > peak) { peak = g.lum[i]; peakRow = r; }
-        if (g.edge[i] > edgeMax) { edgeMax = g.edge[i]; edgeRow = r; }
-      }
-      const lum = sl / BAND;
-      return {
-        col: c, x: (c + 0.5) / g.cols, lum, edge: se / BAND, sat: ss / BAND, peak, contrast: peak - lum,
-        yPeak: (band + peakRow + 0.5) / g.rows, yEdge: (band + edgeRow + 0.5) / g.rows, yBand: (band + BAND / 2) / g.rows, row: band + peakRow,
-      };
-    });
+  /** Scan line position (x in image coords 0..1) at a fractional loop bar. First sweep: left → right, then ping-pong. */
+  scanAt(loopBarF) {
+    const sec = this.sectionAt(Math.floor(loopBarF));
+    const phase = sec.phase0 + (loopBarF - sec.start) * sec.rate;
+    const k = Math.floor(phase), fr = phase - k;
+    return { x: k % 2 === 0 ? fr : 1 - fr, sweep: k, mapping: phase < 1, reveal: Math.min(1, phase) };
   }
 
   bar(barIndex) {
+    this.cache = this.cache || new Map();
     if (this.cache.has(barIndex)) return this.cache.get(barIndex);
     const ev = this.compose(barIndex);
     this.cache.set(barIndex, ev);
-    if (this.cache.size > 64) this.cache.delete(this.cache.keys().next().value);
+    if (this.cache.size > 48) this.cache.delete(this.cache.keys().next().value);
     return ev;
   }
 
-  /** The phrase pattern (fixed for 4 bars): this is what makes it hypnotic. */
-  phrase(loopBar, sec) {
-    const ph = Math.floor(loopBar / 4) * 4;
-    const rng = makeRng(hashInts(this.seed, ph, 0xf4a));
-    const cs = this.columnStats(ph), S = this.S, f = this.f;
-    const winEdge = cs.reduce((s, c) => s + c.edge, 0) / STEPS;
-    const winSat = cs.reduce((s, c) => s + c.sat, 0) / STEPS;
-    const maxEdge = Math.max(1e-3, ...cs.map((c) => c.edge));
-    const edgiest = cs.reduce((bi, c, i) => (c.edge > cs[bi].edge ? i : bi), 0);
-    const brightest = cs.reduce((bi, c, i) => (c.lum > cs[bi].lum ? i : bi), 0);
-    const prog = sec.barInSection / sec.bars;
-    // clicks: edge density → count; grows through the build, thins in the fall
-    const dens = { INTRO: 0.25, BUILD: 0.45 + 0.45 * prog, PEAK: 1, FALL: 0.6 * (1 - prog), SILENCE: 0.12 }[sec.name];
-    const kClick = Math.max(sec.name === 'SILENCE' ? 0 : 1, Math.round((3 + winEdge * 14 + f.edgeDensity * 4) * S.clickDens * dens));
-    const click = euclid(Math.min(13, kClick), STEPS, edgiest);
-    const kNoise = Math.round((winSat * 6 + f.saturation * 3) * S.noise * 1.4);
-    const noise = euclid(Math.min(6, Math.max(1, kNoise)), STEPS, Math.floor(f.hue * 16) + 2);
-    return { cs, click, noise, maxEdge, edgiest, brightest, winEdge, rng };
-  }
-
   compose(barIndex) {
-    const loop = Math.floor(barIndex / this.loopBars), loopBar = barIndex % this.loopBars;
-    const sec = this.sectionAt(loopBar);
-    const S = this.S, f = this.f, P = this.params;
-    const rng = makeRng(hashInts(this.seed, loopBar, loop % 3, 7));     // later loops vary slightly
-    const ph = this.phrase(loopBar, sec);
-    const cs = ph.cs;
+    const loop = Math.floor(barIndex / this.loopBars), b = barIndex % this.loopBars;
+    const sec = this.sectionAt(b), name = sec.name, sb = sec.barInSection, prog = sb / sec.bars;
+    const rng = makeRng(hashInts(this.seed, b, loop % 4, 11));
+    const M = this.map, P = this.P, f = this.f, root = P.root;
     const out = [];
     const push = (step, type, o = {}) => out.push({ step, type, ...o });
-    const sb = sec.barInSection, prog = sb / sec.bars, name = sec.name;
     const pan = (x) => clamp(x * 1.8 - 0.9, -0.9, 0.9);
-    const phraseStart = loopBar % 4 === 0;
 
-    // ── the collapse: one huge glitch, then silence while the image re-coheres ──
-    if (loopBar === this.collapseBar) {
-      const c = cs[ph.brightest];
-      push(0, 'glitch', { big: true, vel: 1, x: c.x, y: c.yPeak, pan: 0, row: c.row });
-      push(0, 'sub', { freq: P.root, to: P.root * 0.5, dur: 1, vel: 0.3 });
+    // ── END: the crash, then nothing ──
+    if (name === 'END') {
+      if (sb === 0) push(0, 'crash', { x: 0.5, y: 0.5, vel: 1 });
       return out;
     }
 
-    // ── KICK: an insistent, repeating pattern (the world's), from BUILD to PEAK ──
-    const kickOn = name === 'BUILD' || name === 'PEAK';
-    const kvel = clamp((0.62 + f.contrast * 1.4) * S.kickGain, 0.4, 1);
-    const decay = S.kickDecay * (0.85 + f.contrast * 0.5);
-    if (kickOn) {
-      let ks = S.kick;
-      if (name === 'BUILD' && sb < 4) ks = [0];                          // the pulse arrives alone
-      else if (name === 'BUILD' && sb < 8) ks = ks.filter((s) => s === 0 || s === 8);
-      if (this.primary === 'MATRIX') ks = ks.filter((s) => s === 0 || ph.rng() > 0.12);
-      for (const s of ks) push(s, 'kick', { vel: s === 0 ? kvel : kvel * 0.92, decay });
-      // a rare ghost kick from the brightest column (micro-variation)
-      if (name === 'PEAK' && rng() < S.ghost) {
-        const g = (ph.brightest | 1) % 16;
-        if (!ks.includes(g)) push(g, 'kick', { vel: kvel * 0.35, decay: decay * 0.5, ghost: true });
-      }
-    } else if (name === 'FALL' && sb < 6 && sb % 2 === 0) {
-      push(0, 'kick', { vel: kvel * 0.5, decay: decay * 1.4 });           // a heartbeat, falling away
-    }
-
-    // ── SUB: clean sine pressure — slow drone, or gated pulses between the kicks ──
-    const root = P.root;
-    if (S.sub === 'pulse' && kickOn && !(name === 'BUILD' && sb < 8)) {
-      for (const s of S.subSteps) push(s, 'pulse', { freq: root, dur: 0.85, vel: 0.24 + 0.08 * (name === 'PEAK' ? 1 : prog) });
-    } else if (loopBar % 4 === 0 && name !== 'SILENCE') {
-      // drone: one note per phrase, moving very slowly (1 ↔ 9/8 ↔ 3/4) with the image's brightness
-      const ratios = [1, 1, 9 / 8, 1, 3 / 4];
-      const r = name === 'FALL' ? 1 : ratios[Math.floor(cs[ph.brightest].lum * 4.99)];
-      const to = name === 'FALL' ? root * 0.75 : root * r;
-      push(0, 'sub', { freq: root * r, to, dur: 4, vel: name === 'INTRO' ? 0.18 + 0.1 * prog : 0.26 });
-    } else if (name === 'SILENCE' && sb === 0) {
-      push(0, 'sub', { freq: root * 0.75, to: root * 0.5, dur: 4, vel: 0.16 });   // the last breath
-    }
-
-    // ── CLICK: the v1 palette, Euclidean from the image columns ──
-    const clickPat = ph.click.slice();
-    // micro-variation: at most one step moves per bar
-    if (rng() < 0.4) { const on = clickPat.map((v, i) => (v ? i : -1)).filter((i) => i >= 0); if (on.length) { const i = on[Math.floor(rng() * on.length)]; clickPat[i] = 0; clickPat[(i + (rng() < 0.5 ? 1 : 15)) % 16] = 1; } }
-    if (name === 'INTRO' && sb % 2 === 1 && sb < sec.bars / 2) clickPat.fill(0);   // space in the intro
+    // what the scan line crosses during this bar
+    const cols = [];
     for (let i = 0; i < STEPS; i++) {
-      if (!clickPat[i]) continue;
-      const c = cs[i];
-      const vel = 0.25 + 0.75 * (c.edge / ph.maxEdge);
-      const crush = name === 'PEAK' && rng() < S.crush * 0.5;
-      push(i, 'click', { vel, pan: pan(c.x), x: c.x, y: c.yEdge, variant: Math.floor(c.sat * 3.99), crush });
-      if ((name === 'PEAK' || name === 'BUILD') && rng() < f.edgeDensity * 0.18 + 0.03) push(i + 0.25, 'click', { vel: vel * 0.5, pan: -pan(c.x), x: c.x, y: c.yEdge, variant: 3, crush });
+      const s = this.scanAt(b + i / STEPS);
+      const c = Math.min(GC - 1, Math.floor(s.x * GC));
+      cols.push({ ...M.col[c], c, sx: s.x });
     }
+    const prevCol = (i) => (i > 0 ? cols[i - 1] : M.col[Math.min(GC - 1, Math.floor(this.scanAt(b - 1 / STEPS).x * GC))]);
+    const T = M.thr;
+    const meanH = cols.reduce((s, c) => s + c.hMean, 0) / STEPS;
 
-    // ── NOISE: short gated bursts (second half of the build, the peak) ──
-    const noiseOn = this.has('NOISE') && ((name === 'BUILD' && prog >= 0.5) || name === 'PEAK');
-    // ── DATA: data stutters / dial pulses (transmission) ──
-    const dataOn = this.has('DATA') && ((name === 'BUILD' && prog >= (this.has('NOISE') ? 0.75 : 0.5)) || name === 'PEAK' || (name === 'INTRO' && sb >= sec.bars - 4));
-    // both optional layers never play in the same phrase at the peak (layer budget)
-    const phraseIdx = Math.floor(loopBar / 4);
-    const pickNoise = noiseOn && !(dataOn && name === 'PEAK' && phraseIdx % 2 === 1);
-    const pickData = dataOn && !(noiseOn && name === 'PEAK' && phraseIdx % 2 === 0);
-    if (pickNoise) for (let i = 0; i < STEPS; i++) {
-      if (!ph.noise[i]) continue;
-      const c = cs[i];
-      push(i, 'noise', { vel: 0.12 + 0.28 * c.sat + 0.08 * rng(), dur: 0.012 + rng() * 0.05, freq: 600 * Math.pow(2, c.sat * 3.5 + c.lum * 1.5), q: 3 + rng() * 9, pan: pan(c.x), x: c.x, y: c.yBand });
+    // ── SUB: pressure following the height under the scan (calm, not every bar) ──
+    const subOn = name !== 'MAPPING' || sb >= 4;
+    if (subOn && b % 2 === 0) {
+      const ratio = meanH > 0.62 ? 9 / 8 : meanH < 0.3 ? 3 / 4 : 1;
+      const vel = { MAPPING: 0.1 + 0.1 * prog, LISTENING: 0.2, INTENSIFY: 0.26, CONSUMPTION: 0.22 * (1 - prog * 0.6) }[name];
+      if (name !== 'LISTENING' || rng() < 0.75) push(0, 'sub', { freq: root * ratio, to: name === 'CONSUMPTION' ? root * ratio * 0.75 : root * ratio, dur: 2, vel, x: cols[0].sx, y: cols[0].yMax });
     }
-    if (pickData && (name !== 'INTRO' || sb % 2 === 0)) {
-      const tries = this.primary === 'MATRIX' ? 2 : 1;
-      for (let t = 0; t < tries; t++) {
-        if (rng() > clamp(this.amounts.data * (name === 'PEAK' ? 1.1 : 0.7))) continue;
-        const i = rng() < 0.5 ? ph.edgiest : Math.floor(rng() * 16), c = cs[i];
-        if (S.dataKind === 'dial' && rng() < 0.6) push(i, 'data', { kind: 'dial', count: 2 + Math.floor(c.lum * 8), vel: 0.22, pan: pan(c.x), x: c.x, y: c.yPeak });
-        else push(i, 'data', { kind: 'stutter', count: 3 + Math.floor(rng() * 6), rate: [1 / 3, 1 / 4, 1 / 6][Math.floor(rng() * 3)], vel: 0.16 + 0.12 * rng(), row: c.row, pan: pan(c.x), x: c.x, y: c.yPeak, crush: rng() < S.crush });
+    // the focal point: when the scan crosses it, the sub swells (the orbit breathes)
+    for (let i = 0; i < STEPS; i++) {
+      const p = prevCol(i);
+      const fx = M.focal.x;
+      if ((p.x - fx) * (cols[i].x - fx) <= 0 && Math.abs(p.x - cols[i].x) < 0.2 && name !== 'MAPPING') {
+        push(i, 'sub', { freq: root, to: root, dur: 1, vel: 0.3, focus: true, x: fx, y: M.focal.y });
+        break;
       }
     }
 
-    // ── GLITCH: white flash + digital glitch, as structural accents ──
-    const g = (step, o = {}) => { const c = cs[Math.floor(step) % 16]; push(step, 'glitch', { vel: 0.7, x: c.x, y: c.yEdge, pan: pan(c.x), row: c.row, ...o }); };
-    if (name === 'INTRO' && sb === Math.floor(sec.bars / 2)) g(0);
-    if (name === 'BUILD' && loopBar % 8 === 0 && sb > 0) g(0);
-    if (name === 'BUILD' && phraseStart && rng() < S.glitch * f.contrast * 1.5) g(8 + Math.floor(rng() * 8));
-    if (name === 'PEAK') {
-      if (phraseStart) g(0, { vel: 0.85 });
-      if (rng() < S.glitch * 0.6) g(4 + Math.floor(rng() * 12));
-      if (loopBar === this.collapseBar - 1) for (const s of [8, 10, 11, 12, 13, 14, 14.5, 15, 15.5]) g(s, { vel: 0.6 + (s - 8) * 0.05, storm: true });   // the storm before the collapse
+    // ── HUM: the machine hum of the map, slowly following its mean height ──
+    if ((name === 'LISTENING' || name === 'INTENSIFY' || (name === 'CONSUMPTION' && prog < 0.6)) && b % 4 === 0) {
+      push(0, 'hum', { freq: root * 2, dur: 4, vel: 0.035 + 0.04 * meanH, x: 0.5, y: 0.5 });
     }
 
-    // ── TONE: once, right after the collapse — the emotional moment ──
-    if (loopBar === this.fallStart + 1) push(0, 'tone', { freqs: [root * 2, root * 3], dur: 3, vel: 0.12 });
+    // ── RESONANCE: valleys and plateaus ring softly (low/mid sines, slow) ──
+    if ((name === 'LISTENING' || name === 'CONSUMPTION' || (name === 'INTENSIFY' && prog < 0.3)) && b % 2 === 1) {
+      const v = cols.find((c) => c.hMean < T.valley * 1.15 && c.eMax < T.edge);
+      if (v && rng() < 0.7) {
+        const harm = [3, 4, 5, 6, 8][Math.min(4, Math.floor(v.hMean * 5))];
+        push(cols.indexOf(v), 'res', { freq: root * harm, dur: 2 + Math.floor(rng() * 2), vel: 0.045, x: v.x, y: v.yMax });
+      }
+    }
 
-    // ── silence as composition: breath before boundaries + world-dependent gaps ──
-    let mute = null;
-    if (sb === sec.bars - 1 && name !== 'SILENCE') mute = [12, 16];
-    else if (name !== 'INTRO' && name !== 'SILENCE' && rng() < S.silence * 0.3) mute = [[12, 16], [6, 8], [14, 16]][Math.floor(rng() * 3)];
-    let kept = mute ? out.filter((e) => e.type === 'sub' || e.type === 'tone' || e.step < mute[0] || e.step >= mute[1]) : out;
-    if (name === 'SILENCE' && sb >= sec.bars - 3) kept = [];                // the last bars are silent
+    // ── TRANSMISSION: while mapping, the scanned columns are transmitted as data ──
+    if ((name === 'MAPPING' && sb % 2 === 1) || (name === 'LISTENING' && sb % 6 === 3) || (name === 'CONSUMPTION' && sb % 5 === 2)) {
+      const c = cols[8];
+      const bits = []; for (let r = 0; r < M.grid.rows; r++) bits.push(M.grid.lum[r * GC + c.c] > c.hMean ? 1 : 0);
+      push(rng.int(2, 9), 'transmission', { bits, vel: 0.05, x: c.x, y: 0.5, pan: pan(c.x) * 0.6 });
+    }
 
-    // ── layer budget: never more than MAX_LAYERS at once ──
+    // ── CLICK / GLITCH: the hard edges the scan crosses ──
+    const clickProb = { MAPPING: 0.45, LISTENING: 0.55, INTENSIFY: 0.95, CONSUMPTION: 0.5 }[name] * P.density;
+    const maxClicks = { MAPPING: 3, LISTENING: 4, INTENSIFY: 9, CONSUMPTION: 4 }[name];
+    let nClick = 0, nGlitch = 0;
+    for (let i = 0; i < STEPS; i++) {
+      const c = cols[i], p = prevCol(i);
+      const crossing = c.eMax > T.edge && (c.c !== p.c) && (c.eMax - p.eMax > 0.02 || rng() < 0.25);
+      if (!crossing) continue;
+      if (c.eMax > T.glitch && name !== 'MAPPING' && nGlitch < (name === 'INTENSIFY' ? 2 : 1) && rng() < { LISTENING: 0.3, INTENSIFY: 0.5, CONSUMPTION: 0.35 }[name]) {
+        push(i, 'glitch', { vel: 0.75, x: c.x, y: c.yEdge, pan: pan(c.x), row: Math.floor(c.yEdge * 31), slice: this.sliceBars.has(b) && nGlitch === 0 });
+        nGlitch++;
+      } else if (nClick < maxClicks && rng() < clickProb) {
+        push(i, 'click', { vel: 0.3 + 0.6 * clamp(c.eMax), pan: pan(c.x), x: c.x, y: c.yEdge, variant: Math.floor((c.sat || 0) * 3.99) });
+        nClick++;
+        if (name === 'INTENSIFY' && rng() < 0.15) push(i + 0.25, 'click', { vel: 0.25, pan: -pan(c.x), x: c.x, y: c.yEdge, variant: 3 });
+      }
+    }
+    // the slice moments always have their glitch
+    if (this.sliceBars.has(b) && !out.some((e) => e.slice)) { const c = cols[4]; push(4, 'glitch', { vel: 0.85, x: c.x, y: c.yEdge, pan: pan(c.x), row: Math.floor(c.yEdge * 31), slice: true }); }
+
+    // ── KICK: pressure on the ridges — rare, irregular, absent in parts ──
+    const phrase = Math.floor(sb / 4);
+    const kickPhraseOff = name === 'INTENSIFY' && hashInts(this.seed, b >> 2) % 3 === 0;   // whole phrases without beat
+    if ((name === 'LISTENING' || name === 'INTENSIFY') && !kickPhraseOff) {
+      let nk = 0;
+      for (let i = 0; i < STEPS; i++) {
+        const c = cols[i], p = prevCol(i);
+        const ridge = c.hMax > T.ridge && c.hMax >= p.hMax && (i === STEPS - 1 || c.hMax >= cols[i + 1].hMax);
+        if (!ridge) continue;
+        if (name === 'LISTENING' && (b % 2 === 1 || nk >= 1 || rng() > 0.5)) continue;
+        if (nk >= 3) break;
+        push(i, 'kick', { vel: clamp(0.55 + c.hMax * 0.4 + f.contrast * 0.3, 0.4, 1), decay: P.kickDecay, x: c.x, y: c.yMax });
+        nk++;
+      }
+      // in the intensification an irregular pattern joins the ridges (Euclidean, rotated by the terrain)
+      if (name === 'INTENSIFY' && prog > 0.25 && nk < 2) {
+        const pat = euclid(2 + (phrase % 2), STEPS, Math.floor(meanH * 16) + phrase * 3);
+        for (let i = 0; i < STEPS; i++) if (pat[i] && !out.some((e) => e.type === 'kick' && Math.abs(e.step - i) < 2)) push(i, 'kick', { vel: 0.7, decay: P.kickDecay * 0.8, x: cols[i].x, y: cols[i].yMax });
+      }
+    } else if (name === 'CONSUMPTION' && sb < 6 && sb % 2 === 0) {
+      push(0, 'kick', { vel: 0.5, decay: P.kickDecay * 1.3, x: cols[0].x, y: cols[0].yMax });   // a heartbeat, leaving
+    }
+
+    // ── PULSE: gated sub pulses between the kicks (intensification only, irregular) ──
+    if (name === 'INTENSIFY' && prog > 0.4 && !kickPhraseOff) {
+      const pat = euclid(3 + Math.floor(meanH * 3), STEPS, (b * 5) % 16);
+      for (let i = 0; i < STEPS; i++) if (pat[i] && !out.some((e) => e.type === 'kick' && Math.floor(e.step) === i)) push(i, 'pulse', { freq: root, dur: 0.8, vel: 0.2, x: cols[i].x, y: cols[i].yMax });
+    }
+
+    // ── NOISE: rough texture breaks off in short gated bursts ──
+    if (name === 'INTENSIFY' || (name === 'LISTENING' && prog > 0.5) || name === 'CONSUMPTION') {
+      let nn = 0;
+      for (let i = 0; i < STEPS && nn < (name === 'INTENSIFY' ? 3 : 1); i++) {
+        const c = cols[i];
+        if (c.tex > T.tex && rng() < 0.35) { push(i, 'noise', { vel: 0.12 + 0.25 * clamp(c.tex * 2), dur: 0.012 + rng() * 0.04, freq: 700 * Math.pow(2, (c.sat || 0) * 3 + c.hMean * 1.5), q: 3 + rng() * 9, pan: pan(c.x), x: c.x, y: c.yEdge }); nn++; }
+      }
+    }
+
+    // ── DATA: saturated, structured places stutter (image rows as waveforms / dial pulses) ──
+    if ((name === 'INTENSIFY' && rng() < 0.45) || (name === 'LISTENING' && sb % 4 === 2 && rng() < 0.5)) {
+      const c = cols[Math.floor(rng() * STEPS)];
+      if (rng() < 0.5) push(Math.floor(rng() * 14), 'data', { kind: 'stutter', count: 3 + Math.floor(rng() * 5), rate: [1 / 3, 1 / 4, 1 / 6][Math.floor(rng() * 3)], vel: 0.15 + 0.1 * rng(), row: Math.floor(c.yEdge * 31), pan: pan(c.x), x: c.x, y: c.yEdge, crush: rng() < 0.3 });
+      else push(Math.floor(rng() * 12), 'data', { kind: 'dial', count: 2 + Math.floor(c.hMean * 8), vel: 0.2, pan: pan(c.x), x: c.x, y: c.yMax });
+    }
+
+    // ── TONE: once, as the image starts to be consumed ──
+    if (name === 'CONSUMPTION' && sb === 1) push(0, 'tone', { freqs: [root * 2, root * 3], dur: 4, vel: 0.11, x: M.focal.x, y: M.focal.y });
+
+    // ── silence: valleys mute the second half of a bar now and then; breath before boundaries ──
+    let kept = out;
+    if (sb === sec.bars - 1) kept = kept.filter((e) => ['sub', 'hum', 'res', 'tone'].includes(e.type) || e.step < 12);
+    else if (meanH < T.valley && rng() < 0.35) kept = kept.filter((e) => ['sub', 'hum', 'res', 'tone'].includes(e.type) || e.step < 8);
+
+    // ── soft layer budget ──
     const present = PRIORITY.filter((L) => kept.some((e) => LAYER_OF[e.type] === L));
-    if (present.length > MAX_LAYERS) { const allowed = new Set(present.slice(0, MAX_LAYERS)); kept = kept.filter((e) => allowed.has(LAYER_OF[e.type])); }
-    kept.sort((a, b) => a.step - b.step);
+    if (present.length > MAX_LAYERS) { const ok = new Set(present.slice(0, MAX_LAYERS)); kept = kept.filter((e) => ok.has(LAYER_OF[e.type])); }
+    kept.sort((a, b2) => a.step - b2.step);
     return kept;
   }
 }
